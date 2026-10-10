@@ -1,5 +1,7 @@
 pub mod animdata;
+pub mod bounds;
 pub mod index;
+pub mod sprites;
 
 use tauri::RunEvent;
 
