@@ -1,4 +1,5 @@
 pub mod animdata;
+pub mod index;
 
 use tauri::RunEvent;
 
