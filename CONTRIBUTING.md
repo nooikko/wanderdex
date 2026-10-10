@@ -68,3 +68,4 @@ and they are squash-merged.
 ## License
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).
+
