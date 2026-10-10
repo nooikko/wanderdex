@@ -13,7 +13,20 @@ pub struct HttpFetch(reqwest::Client);
 
 impl HttpFetch {
     pub fn new() -> Self {
-        HttpFetch(reqwest::Client::builder().user_agent("Wanderdex").build().expect("HTTP client"))
+        Self::with_timeouts(std::time::Duration::from_secs(10), std::time::Duration::from_secs(30))
+    }
+}
+
+impl HttpFetch {
+    /// A stalled connection must fail (and show Retry) rather than hang the picker or restore forever.
+    pub fn with_timeouts(connect: std::time::Duration, total: std::time::Duration) -> Self {
+        let client = reqwest::Client::builder()
+            .user_agent("Wanderdex")
+            .connect_timeout(connect)
+            .timeout(total)
+            .build()
+            .expect("HTTP client");
+        HttpFetch(client)
     }
 }
 
@@ -220,6 +233,23 @@ mod tests {
         let err = run(ensure_variant(&fetch, cache.path(), "sha1", "0202")).unwrap_err();
         assert!(matches!(err, SpriteError::Invalid(_)), "{err}");
         assert!(!cache.path().join("sprites/sha1/0202").exists());
+    }
+
+    #[test]
+    fn stalled_server_times_out_instead_of_hanging() {
+        // Accepts the connection but never answers (captive portal, dead Wi-Fi mid-transfer).
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _hold = std::thread::spawn(move || {
+            let conns: Vec<_> = listener.incoming().take(1).collect();
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            drop(conns);
+        });
+        let fetch = HttpFetch::with_timeouts(std::time::Duration::from_secs(1), std::time::Duration::from_secs(1));
+        let started = std::time::Instant::now();
+        let result = run(fetch.get(&format!("http://{addr}/AnimData.xml")));
+        assert!(result.is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "took {:?}", started.elapsed());
     }
 
     #[test]
