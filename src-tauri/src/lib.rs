@@ -7,11 +7,13 @@ pub mod index;
 pub mod persist;
 pub mod pets;
 pub mod sprites;
+pub mod tray;
 
 use tauri::{Manager, RunEvent};
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .invoke_handler(tauri::generate_handler![
             commands::pet_ready,
             commands::pet_click,
@@ -24,10 +26,14 @@ pub fn run() {
             let cache_root = app.path().app_data_dir()?;
             let settings_path = app.path().app_config_dir()?.join("settings.json");
             app.manage(pets::AppState::new(cache_root, settings_path));
+            tray::build_tray(app.handle())?;
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             app.on_menu_event(|app, event| {
                 let id = event.id().as_ref();
+                if tray::handle_menu(app, id) {
+                    return;
+                }
                 if let Some(label) = id.strip_prefix("pet-move:") {
                     commands::pet_move(app, label);
                 } else if let Some(label) = id.strip_prefix("pet-remove:") {
