@@ -55,9 +55,25 @@ pub fn restorable<'a>(s: &'a Settings, index: &Index) -> Vec<&'a SavedPet> {
     s.pets.iter().filter(|p| find_variant(index, &p.variant).is_some()).collect()
 }
 
+/// The pets to save: live pets plus saved pets not (yet) restored, so an offline launch or a quit
+/// mid-restore never erases them.
+pub fn pets_to_save(mut live: Vec<SavedPet>, pending: &[SavedPet]) -> Vec<SavedPet> {
+    live.extend_from_slice(pending);
+    live
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unrestored_pets_survive_saves() {
+        let live = vec![SavedPet { variant: "0202".into(), x: 1.0, y: 2.0 }];
+        let pending = vec![SavedPet { variant: "0025".into(), x: 3.0, y: 4.0 }];
+        let saved = pets_to_save(live, &pending);
+        let variants: Vec<&str> = saved.iter().map(|p| p.variant.as_str()).collect();
+        assert_eq!(variants, ["0202", "0025"]);
+    }
 
     #[test]
     fn round_trips() {

@@ -38,6 +38,8 @@ pub struct AppState {
     pub http: HttpFetch,
     pub next_id: AtomicU64,
     monitors: Mutex<Vec<MonitorInfo>>,
+    /// Saved pets not yet restored (or whose restore failed); kept in every save.
+    pending: Mutex<Vec<SavedPet>>,
 }
 
 impl AppState {
@@ -51,6 +53,7 @@ impl AppState {
             http: HttpFetch::new(),
             next_id: AtomicU64::new(1),
             monitors: Mutex::new(Vec::new()),
+            pending: Mutex::new(Vec::new()),
         }
     }
 }
@@ -117,6 +120,11 @@ fn snapped(g: Ground, scale: u32) -> Ground {
 
 /// Downloads (if needed) and spawns a pet. `at` is a physical (x, feet y); default: random spot under the cursor.
 pub async fn spawn_pet(app: &AppHandle, variant: &str, at: Option<(f64, f64)>) -> Result<(), String> {
+    spawn_inner(app, variant, at, None).await
+}
+
+/// `restoring`: the pending saved pet this spawn replaces; it leaves `pending` the moment the pet is live.
+async fn spawn_inner(app: &AppHandle, variant: &str, at: Option<(f64, f64)>, restoring: Option<&SavedPet>) -> Result<(), String> {
     let index = bundled();
     let (species, _) = find_variant(index, variant).ok_or_else(|| format!("Unknown variant {variant}"))?;
     let state = app.state::<AppState>();
@@ -174,6 +182,12 @@ pub async fn spawn_pet(app: &AppHandle, variant: &str, at: Option<(f64, f64)>) -
         shown: false,
     };
     state.pets.lock().unwrap().push(pet);
+    if let Some(p) = restoring {
+        let mut pending = state.pending.lock().unwrap();
+        if let Some(i) = pending.iter().position(|q| q == p) {
+            pending.remove(i);
+        }
+    }
     {
         let mut s = state.settings.lock().unwrap();
         if !s.credited.iter().any(|c| c == variant) {
@@ -240,9 +254,10 @@ pub fn save_settings(app: &AppHandle) {
         .iter()
         .map(|p| SavedPet { variant: p.variant.clone(), x: p.brain.x, y: p.brain.y })
         .collect();
+    let pending = state.pending.lock().unwrap().clone();
     let snapshot = {
         let mut s = state.settings.lock().unwrap();
-        s.pets = pets;
+        s.pets = persist::pets_to_save(pets, &pending);
         s.clone()
     };
     if let Err(e) = persist::save(&state.settings_path, &snapshot) {
@@ -314,17 +329,19 @@ pub fn start_loop(app: AppHandle) {
     });
 }
 
-/// Respawns saved pets that still exist in the index.
+/// Respawns saved pets that still exist in the index. Until each one is live it stays in `pending`, so a
+/// failed (e.g. offline) restore keeps it saved for the next launch.
 pub fn restore(app: AppHandle) {
     let saved: Vec<SavedPet> = {
         let state = app.state::<AppState>();
         let s = state.settings.lock().unwrap();
         persist::restorable(&s, bundled()).into_iter().cloned().collect()
     };
+    *app.state::<AppState>().pending.lock().unwrap() = saved.clone();
     tauri::async_runtime::spawn(async move {
         for p in saved {
-            if let Err(e) = spawn_pet(&app, &p.variant, Some((p.x, p.y))).await {
-                eprintln!("Couldn't restore {}: {e}", p.variant);
+            if let Err(e) = spawn_inner(&app, &p.variant, Some((p.x, p.y)), Some(&p)).await {
+                eprintln!("Couldn't restore {}: {e} (kept for next launch)", p.variant);
             }
         }
     });
