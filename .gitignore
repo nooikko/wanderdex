@@ -1,19 +1,13 @@
 # Build output
-*.app
 /target
 node_modules/
 dist/
-
-# Downloaded sprites and previews (CC BY-NC / third-party art; fetched at runtime, never committed)
-/assets/
-*-preview.png
-style-comparison.png
-
-# GPL-3 xBRZ sources from the prototype (not carried into the MIT project)
-/ThirdParty/xbrz/
-
-.DS_Store
-.superpowers/
 /src-tauri/target
 /src-tauri/gen
 /contact-sheet.png
+
+# Downloaded sprites from the old prototype (CC BY-NC; fetched at runtime, never committed)
+/assets/
+
+.DS_Store
+.superpowers/
