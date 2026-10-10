@@ -21,6 +21,13 @@ pub fn run() {
             commands::pet_drag_move,
             commands::pet_drop,
             commands::pet_context_menu,
+            commands::get_index,
+            commands::ensure_portrait_cmd,
+            commands::load_variant,
+            commands::spawn,
+            commands::list_pets,
+            commands::remove_pet_cmd,
+            commands::remove_all_cmd,
         ])
         .setup(|app| {
             let cache_root = app.path().app_data_dir()?;

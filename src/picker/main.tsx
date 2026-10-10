@@ -1,2 +1,5 @@
 import { createRoot } from "react-dom/client";
-createRoot(document.getElementById("root")!).render(<h1>Wanderdex</h1>);
+import { App } from "./App";
+import "./picker.css";
+
+createRoot(document.getElementById("root")!).render(<App />);

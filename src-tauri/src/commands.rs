@@ -90,3 +90,88 @@ pub fn pet_move(app: &AppHandle, label: &str) {
         p.brain.click();
     }
 }
+
+use crate::index::{bundled, find_variant, signature_for, Index};
+use crate::sprites::{ensure_portrait, ensure_variant};
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariantPayload {
+    pub dir: String,
+    pub table: Vec<AnimInfo>,
+    pub content_box: BoxI,
+    pub signature: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivePet {
+    pub label: String,
+    pub variant: String,
+    pub dex: String,
+    pub name: String,
+    pub form: String,
+    pub shiny: bool,
+    pub female: bool,
+}
+
+#[tauri::command]
+pub fn get_index() -> Index {
+    bundled().clone()
+}
+
+#[tauri::command]
+pub async fn ensure_portrait_cmd(app: AppHandle, dex: String) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let path = ensure_portrait(&state.http, &state.cache_root, &bundled().sprite_collab_sha, &dex)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub async fn load_variant(app: AppHandle, path: String) -> Result<VariantPayload, String> {
+    let (species, _) = find_variant(bundled(), &path).ok_or_else(|| format!("Unknown variant {path}"))?;
+    let signature = signature_for(&species.dex).map(String::from);
+    let state = app.state::<AppState>();
+    let v = ensure_variant(&state.http, &state.cache_root, &bundled().sprite_collab_sha, &path)
+        .await
+        .map_err(|e| e.to_string())?;
+    let content_box = crate::bounds::content_box(&v.table, &v.sheets, &crate::brain::behavior_anims(signature.as_deref()));
+    Ok(VariantPayload { dir: v.dir.to_string_lossy().into_owned(), table: v.table.anims, content_box, signature })
+}
+
+#[tauri::command]
+pub async fn spawn(app: AppHandle, variant: String) -> Result<(), String> {
+    pets::spawn_pet(&app, &variant, None).await
+}
+
+#[tauri::command]
+pub fn list_pets(app: AppHandle) -> Vec<ActivePet> {
+    let state = app.state::<AppState>();
+    let pets = state.pets.lock().unwrap();
+    pets.iter()
+        .filter_map(|p| {
+            let (s, v) = find_variant(bundled(), &p.variant)?;
+            Some(ActivePet {
+                label: p.label.clone(),
+                variant: p.variant.clone(),
+                dex: s.dex.clone(),
+                name: s.name.clone(),
+                form: v.form.clone(),
+                shiny: v.shiny,
+                female: v.female,
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn remove_pet_cmd(app: AppHandle, label: String) {
+    pets::remove_pet(&app, &label);
+}
+
+#[tauri::command]
+pub fn remove_all_cmd(app: AppHandle) {
+    pets::remove_all(&app);
+}
