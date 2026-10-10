@@ -1,11 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { DragTracker } from "../shared/drag";
 import { Player } from "../shared/player";
 import { drawFrame, setupCanvas } from "../shared/renderer";
 import { loadSheets } from "../shared/sheets";
 import type { PetInit, Visual } from "../shared/types";
-
-const DRAG_THRESHOLD_PX = 3;
 
 async function main() {
   const canvas = document.getElementById("pet") as HTMLCanvasElement;
@@ -34,36 +33,20 @@ async function main() {
   };
   requestAnimationFrame(render);
 
-  let down: { x: number; y: number } | null = null;
-  let dragging = false;
-  let movePending = false;
+  const drag = new DragTracker((cmd) => invoke(cmd));
   canvas.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     canvas.setPointerCapture(e.pointerId);
-    down = { x: e.screenX, y: e.screenY };
-    dragging = false;
+    drag.down(e.screenX, e.screenY);
   });
-  canvas.addEventListener("pointermove", (e) => {
-    if (!down) return;
-    if (!dragging && Math.hypot(e.screenX - down.x, e.screenY - down.y) > DRAG_THRESHOLD_PX) {
-      dragging = true;
-      void invoke("pet_drag_start");
-    }
-    if (dragging && !movePending) {
-      movePending = true;
-      requestAnimationFrame(() => {
-        movePending = false;
-        void invoke("pet_drag_move");
-      });
-    }
-  });
+  canvas.addEventListener("pointermove", (e) => drag.move(e.screenX, e.screenY));
   canvas.addEventListener("pointerup", (e) => {
-    if (e.button !== 0 || !down) return;
-    canvas.releasePointerCapture(e.pointerId);
-    void invoke(dragging ? "pet_drop" : "pet_click");
-    down = null;
-    dragging = false;
+    if (e.button !== 0) return;
+    if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+    void drag.up();
   });
+  canvas.addEventListener("pointercancel", () => void drag.cancel());
+  canvas.addEventListener("lostpointercapture", () => void drag.cancel());
   canvas.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     void invoke("pet_context_menu");
