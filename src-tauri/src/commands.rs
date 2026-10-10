@@ -175,3 +175,25 @@ pub fn remove_pet_cmd(app: AppHandle, label: String) {
 pub fn remove_all_cmd(app: AppHandle) {
     pets::remove_all(&app);
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreditEntry {
+    pub name: String,
+    pub form: String,
+    pub shiny: bool,
+    pub female: bool,
+    pub credits: Vec<String>,
+}
+
+#[tauri::command]
+pub fn get_credits(app: AppHandle) -> Vec<CreditEntry> {
+    let credited = app.state::<AppState>().settings.lock().unwrap().credited.clone();
+    credited
+        .iter()
+        .filter_map(|path| {
+            let (s, v) = find_variant(bundled(), path)?;
+            Some(CreditEntry { name: s.name.clone(), form: v.form.clone(), shiny: v.shiny, female: v.female, credits: v.credits.clone() })
+        })
+        .collect()
+}

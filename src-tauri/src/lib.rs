@@ -13,6 +13,7 @@ use tauri::{Manager, RunEvent};
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .invoke_handler(tauri::generate_handler![
             commands::pet_ready,
@@ -28,6 +29,7 @@ pub fn run() {
             commands::list_pets,
             commands::remove_pet_cmd,
             commands::remove_all_cmd,
+            commands::get_credits,
         ])
         .setup(|app| {
             let cache_root = app.path().app_data_dir()?;
@@ -43,6 +45,8 @@ pub fn run() {
                 }
                 if let Some(label) = id.strip_prefix("pet-move:") {
                     commands::pet_move(app, label);
+                } else if id.starts_with("pet-credits:") {
+                    tray::open_credits(app);
                 } else if let Some(label) = id.strip_prefix("pet-remove:") {
                     pets::remove_pet(app, label);
                 } else if id == "pets-remove-all" {

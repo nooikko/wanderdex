@@ -52,13 +52,17 @@ fn open_window(app: &AppHandle, label: &str, page: &str, title: &str, size: (f64
         let _ = w.set_focus();
         return;
     }
-    let _ = WebviewWindowBuilder::new(app, label, WebviewUrl::App(page.into()))
+    let built = WebviewWindowBuilder::new(app, label, WebviewUrl::App(page.into()))
         .title(title)
         .inner_size(size.0, size.1)
         .min_inner_size(640.0, 480.0)
         .center()
         .focused(true)
         .build();
+    // A tray-only app isn't active, so bring the new window in front of other apps.
+    if let Ok(w) = built {
+        let _ = w.set_focus();
+    }
 }
 
 pub fn open_picker(app: &AppHandle) {
