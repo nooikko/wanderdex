@@ -1,3 +1,5 @@
+pub mod animdata;
+
 use tauri::RunEvent;
 
 pub fn run() {
