@@ -1,5 +1,6 @@
 pub mod animdata;
 pub mod bounds;
+pub mod brain;
 pub mod ground;
 pub mod index;
 pub mod persist;
