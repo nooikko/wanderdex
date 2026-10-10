@@ -88,6 +88,12 @@ pub fn content_box(table: &AnimTable, sheets: &HashMap<String, AlphaSheet>, name
     b.unwrap_or(BoxI { min_x: -1, min_y: -1, max_x: 1, max_y: 1 })
 }
 
+/// The standing foot line: the lowest opaque row of Walk and Idle, relative to the frame center.
+/// Pets are placed so this row rests on the ground.
+pub fn feet_line(table: &AnimTable, sheets: &HashMap<String, AlphaSheet>) -> i32 {
+    content_box(table, sheets, &["Walk".to_string(), "Idle".to_string()]).max_y
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -134,6 +140,24 @@ pub mod tests {
         assert_eq!(frame_bounds(&sheet, 0, 0, 8, 8), Some(BoxI { min_x: -2, min_y: -1, max_x: 1, max_y: 4 }));
         let empty = decode_alpha(&png_bytes(8, 8, |_, _| false)).unwrap();
         assert_eq!(frame_bounds(&empty, 0, 0, 8, 8), None);
+    }
+
+    #[test]
+    fn feet_line_is_the_lowest_walk_or_idle_pixel() {
+        let walk = png_bytes(8, 8, |_, y| y < 6); // opaque rows 0..6 → max_y 6-4 = 2
+        let idle = png_bytes(8, 8, |_, y| y < 7); // max_y 3
+        let swing = png_bytes(8, 8, |_, _| true); // max_y 4, ignored
+        let mut table = crate::animdata::parse(r#"<AnimData><Anims>
+            <Anim><Name>Walk</Name><FrameWidth>8</FrameWidth><FrameHeight>8</FrameHeight><Durations><Duration>1</Duration></Durations></Anim>
+            <Anim><Name>Idle</Name><FrameWidth>8</FrameWidth><FrameHeight>8</FrameHeight><Durations><Duration>1</Duration></Durations></Anim>
+            <Anim><Name>Swing</Name><FrameWidth>8</FrameWidth><FrameHeight>8</FrameHeight><Durations><Duration>1</Duration></Durations></Anim>
+            </Anims></AnimData>"#).unwrap();
+        let mut sheets = HashMap::new();
+        sheets.insert("Walk".to_string(), decode_alpha(&walk).unwrap());
+        sheets.insert("Idle".to_string(), decode_alpha(&idle).unwrap());
+        sheets.insert("Swing".to_string(), decode_alpha(&swing).unwrap());
+        table.validate(|s| sheets.get(s).map(|a| (a.width, a.height))).unwrap();
+        assert_eq!(feet_line(&table, &sheets), 3);
     }
 
     #[test]

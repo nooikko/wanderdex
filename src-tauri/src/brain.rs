@@ -11,7 +11,8 @@ use std::collections::HashMap;
 pub const DOWN: u8 = 0;
 pub const RIGHT: u8 = 2;
 pub const LEFT: u8 = 6;
-pub const FLOURISH_PREFERENCE: [&str; 7] = ["Pose", "Hop", "Rotate", "Charge", "Double", "Swing", "Attack"];
+/// Attack/Swing/Double are left out: they lunge the body around the frame, which looks wrong on a desktop.
+pub const FLOURISH_PREFERENCE: [&str; 4] = ["Pose", "Hop", "Rotate", "Charge"];
 
 /// Tuning (spec §5.2).
 const WEIGHT_WALK: u32 = 50;
@@ -344,6 +345,17 @@ mod tests {
         assert_eq!(dir_from_delta(-1.0, -1.0), 5);
         assert_eq!(dir_from_delta(-1.0, 0.0), 6); // left
         assert_eq!(dir_from_delta(-1.0, 1.0), 7);
+    }
+
+    #[test]
+    fn flourishes_exclude_lunging_attacks() {
+        // Attack/Swing/Double move the body around the frame (Wobbuffet's Swing reaches 21 px below his feet).
+        for lunge in ["Attack", "Swing", "Double"] {
+            assert!(!behavior_anims(None).iter().any(|n| n == lunge), "{lunge}");
+        }
+        let mut b = brain(AnimSet::from_secs(&[("Walk", 0.6), ("Idle", 1.2), ("Swing", 0.3)]), None);
+        b.click();
+        assert_ne!(b.visual().anim, "Swing");
     }
 
     #[test]

@@ -94,7 +94,7 @@ Wanderdex lets people spawn Pokémon onto their desktop as small pixel-art pets 
 |---|---|---|
 | Walk | `Walk` (Left or Right row) | Moves horizontally at a constant speed in screen points per second, scaled with size. Walks a random distance, then picks a new state. Turns around at work-area edges. |
 | Idle | `Idle` (Down row, facing the user) | Lasts a random 2 to 8 seconds. |
-| Flourish | A random choice from the variant's available animations in a preference list: `Pose`, `Hop`, `Rotate`, `Charge`, `Double`, `Swing`, `Attack` | Plays once. |
+| Flourish | A random choice from the variant's available animations in a preference list: `Pose`, `Hop`, `Rotate`, `Charge`. Lunging attacks (`Attack`, `Swing`, `Double`) are excluded because they throw the body around the frame. | Plays once. |
 | Signature | Taken from `overrides.json`, keyed by Pokédex number (for example `"0202": "Withdraw"`) | Plays once. Replaces Flourish when an override exists. |
 | Nap | `Sleep` | Lasts a random 20 to 60 seconds. Only if the variant has `Sleep`. |
 | Dragged | `Walk`, facing the drag direction (8 directions) | Follows the cursor. Gives the "spinning" effect. |
