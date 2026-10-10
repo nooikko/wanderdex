@@ -4,6 +4,16 @@ use crate::animdata::{self, AnimTable};
 use crate::bounds::{decode_alpha, AlphaSheet};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
+use tauri::async_runtime::Mutex as AsyncMutex;
+
+/// One async lock per cache path, so concurrent loads of the same variant (picker preview + spawn,
+/// quick Shiny toggles) don't delete each other's half-written files.
+static PATH_LOCKS: LazyLock<Mutex<HashMap<PathBuf, Arc<AsyncMutex<()>>>>> = LazyLock::new(Default::default);
+
+fn path_lock(path: &Path) -> Arc<AsyncMutex<()>> {
+    PATH_LOCKS.lock().unwrap().entry(path.to_path_buf()).or_default().clone()
+}
 
 pub trait Fetch {
     fn get(&self, url: &str) -> impl std::future::Future<Output = Result<Vec<u8>, String>> + Send;
@@ -106,6 +116,8 @@ async fn download<F: Fetch>(fetch: &F, dir: &Path, sha: &str, path: &str) -> Res
 /// Returns a validated variant, using the cache when valid; otherwise downloads (retrying once).
 pub async fn ensure_variant<F: Fetch>(fetch: &F, cache_root: &Path, sha: &str, path: &str) -> Result<LoadedVariant, SpriteError> {
     let dir = cache_root.join("sprites").join(sha).join(path);
+    let lock = path_lock(&dir);
+    let _guard = lock.lock().await;
     if let Ok(v) = load_cached(&dir, path) {
         return Ok(v);
     }
@@ -127,6 +139,8 @@ pub async fn ensure_variant<F: Fetch>(fetch: &F, cache_root: &Path, sha: &str, p
 /// Returns the cached path of a species' Normal portrait, downloading it if needed.
 pub async fn ensure_portrait<F: Fetch>(fetch: &F, cache_root: &Path, sha: &str, dex: &str) -> Result<PathBuf, SpriteError> {
     let file = cache_root.join("portraits").join(sha).join(format!("{dex}.png"));
+    let lock = path_lock(&file);
+    let _guard = lock.lock().await;
     if std::fs::read(&file).ok().is_some_and(|b| decode_alpha(&b).is_ok()) {
         return Ok(file);
     }
@@ -233,6 +247,53 @@ mod tests {
         let err = run(ensure_variant(&fetch, cache.path(), "sha1", "0202")).unwrap_err();
         assert!(matches!(err, SpriteError::Invalid(_)), "{err}");
         assert!(!cache.path().join("sprites/sha1/0202").exists());
+    }
+
+    /// Returns Pending once, so concurrent downloads interleave at every fetch.
+    struct YieldOnce(bool);
+    impl std::future::Future for YieldOnce {
+        type Output = ();
+        fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+            if self.0 {
+                std::task::Poll::Ready(())
+            } else {
+                self.0 = true;
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+        }
+    }
+
+    struct SlowFetch(FakeFetch);
+    impl Fetch for SlowFetch {
+        async fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+            for _ in 0..3 {
+                YieldOnce(false).await;
+            }
+            self.0.get(url).await
+        }
+    }
+
+    #[test]
+    fn concurrent_loads_of_one_variant_both_succeed() {
+        let fetch = std::sync::Arc::new(SlowFetch(FakeFetch::good()));
+        for round in 0..30 {
+            let cache = tempfile::tempdir().unwrap();
+            let root = std::sync::Arc::new(cache.path().to_path_buf());
+            let tasks: Vec<_> = (0..2)
+                .map(|_| {
+                    let (fetch, root) = (fetch.clone(), root.clone());
+                    tauri::async_runtime::spawn(async move { ensure_variant(&*fetch, &root, "sha1", "0202").await.map(|_| ()) })
+                })
+                .collect();
+            let before = fetch.0.calls().len();
+            for t in tasks {
+                let r = run(t).unwrap();
+                assert!(r.is_ok(), "round {round}: {r:?}");
+            }
+            // The second load waits for the first and reuses its files: one download, not two racing ones.
+            assert_eq!(fetch.0.calls().len() - before, 3, "round {round}: loads raced (each deletes the other's files)");
+        }
     }
 
     #[test]
