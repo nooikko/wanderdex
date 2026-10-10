@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest something Wanderdex could do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: Describe what you want to do with your pets, or what's getting in your way.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How do you imagine it working?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you've tried instead?

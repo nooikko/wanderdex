@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://github.com/nooikko/wanderdex/discussions
+    about: Questions and help using Wanderdex.
+  - name: Report a security vulnerability
+    url: https://github.com/nooikko/wanderdex/security/advisories/new
+    about: Please report security problems privately, not as an issue.
+  - name: Sprite problems
+    url: https://github.com/PMDCollab/SpriteCollab
+    about: Wrong or missing sprite art comes from the PMD Sprite Repository. Report art issues there.

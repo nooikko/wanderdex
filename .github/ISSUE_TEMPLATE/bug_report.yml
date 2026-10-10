@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in Wanderdex doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting! The more specific you are, the faster this gets fixed.
+  - type: input
+    id: version
+    attributes:
+      label: Wanderdex version
+      description: Shown in the installer file name, or the release you downloaded.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version and monitor setup
+      placeholder: "macOS 15.4, laptop + one external 4K monitor"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the Pokémon and variant if it's specific to one.
+      placeholder: |
+        1. Open the picker
+        2. Spawn shiny Wobbuffet
+        3. Drag it onto the second monitor
+    validations:
+      required: true
+  - type: upload
+    id: screenshot
+    attributes:
+      label: Screenshot or recording
+      description: Optional, but very helpful for anything visual.
+      accept: ".png,.jpg,.jpeg,.gif,.mp4,.mov"
