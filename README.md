@@ -14,6 +14,8 @@ Get the latest build from [Releases](../../releases):
 
 Wanderdex isn't code-signed, so your OS will warn you the first time:
 - **macOS:** open the app, dismiss the warning, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
+  If macOS instead says the app "is damaged and can't be opened", run this once in Terminal, then open it again:
+  `xattr -cr /Applications/Wanderdex.app`
 - **Windows:** on the SmartScreen prompt, click **More info → Run anyway**.
 
 ## Using it
