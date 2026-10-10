@@ -197,3 +197,32 @@ pub fn get_credits(app: AppHandle) -> Vec<CreditEntry> {
         })
         .collect()
 }
+
+#[tauri::command]
+pub fn save_contact_sheet(app: AppHandle, data_url: String, report: String, ok: bool) -> Result<(), String> {
+    use std::io::Write;
+    let b64 = data_url.split_once(',').map(|(_, b)| b).ok_or("bad data URL")?;
+    let bytes = base64_decode(b64)?;
+    std::fs::write("contact-sheet.png", bytes).map_err(|e| e.to_string())?;
+    println!("{report}");
+    let _ = std::io::stdout().flush();
+    app.exit(if ok { 0 } else { 1 });
+    Ok(())
+}
+
+fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut buf, mut bits) = (0u32, 0u32);
+    for c in s.bytes().filter(|c| *c != b'=') {
+        let v = ALPHABET.iter().position(|a| *a == c).ok_or("bad base64")? as u32;
+        buf = (buf << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Ok(out)
+}

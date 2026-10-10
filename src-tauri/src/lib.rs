@@ -30,11 +30,21 @@ pub fn run() {
             commands::remove_pet_cmd,
             commands::remove_all_cmd,
             commands::get_credits,
+            commands::save_contact_sheet,
         ])
         .setup(|app| {
             let cache_root = app.path().app_data_dir()?;
             let settings_path = app.path().app_config_dir()?.join("settings.json");
             app.manage(pets::AppState::new(cache_root, settings_path));
+            let args: Vec<String> = std::env::args().collect();
+            if let Some(i) = args.iter().position(|a| a == "--contact") {
+                let variant = args.get(i + 1).cloned().unwrap_or_else(|| "0202".into());
+                tauri::WebviewWindowBuilder::new(app, "contact", tauri::WebviewUrl::App(format!("contact.html?variant={variant}").into()))
+                    .title("Contact sheet")
+                    .inner_size(1400.0, 900.0)
+                    .build()?;
+                return Ok(());
+            }
             tray::build_tray(app.handle())?;
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
