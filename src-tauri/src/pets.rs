@@ -2,7 +2,7 @@
 
 use crate::bounds::{content_box, feet_line, BoxI};
 use crate::brain::{behavior_anims, AnimSet, Brain, Visual};
-use crate::ground::{ground_for, Ground, MonitorInfo};
+use crate::ground::{desktop_cursor, desktop_monitor, ground_for, sprite_px, Ground, MonitorInfo, LOGICAL_DESKTOP};
 use crate::index::{bundled, find_variant, signature_for};
 use crate::persist::{self, SavedPet, Settings};
 use crate::sprites::{ensure_variant, HttpFetch};
@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 pub struct Pet {
     pub label: String,
@@ -62,14 +62,15 @@ pub fn monitor_infos(app: &AppHandle) -> Vec<MonitorInfo> {
         .iter()
         .map(|m| {
             let wa = m.work_area();
-            MonitorInfo {
-                x: wa.position.x as f64,
-                y: wa.position.y as f64,
-                width: wa.size.width as f64,
-                height: wa.size.height as f64,
-                scale: m.scale_factor(),
-                primary: primary == Some(*m.position()),
-            }
+            desktop_monitor(
+                wa.position.x as f64,
+                wa.position.y as f64,
+                wa.size.width as f64,
+                wa.size.height as f64,
+                m.scale_factor(),
+                primary == Some(*m.position()),
+                LOGICAL_DESKTOP,
+            )
         })
         .collect()
 }
@@ -83,13 +84,35 @@ fn ground_at(app: &AppHandle, x: f64, y: f64) -> Ground {
     ground_for(x, y, &monitors).unwrap_or(Ground { left: 0.0, right: 1280.0, y: 800.0, px_per_pt: 1.0 })
 }
 
-fn cursor(app: &AppHandle) -> (f64, f64) {
-    app.cursor_position().map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0))
+/// The cursor in desktop space. Blocking (main-thread round trip): never call while holding the pets lock.
+pub fn cursor(app: &AppHandle) -> (f64, f64) {
+    let primary_scale = app.primary_monitor().ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
+    app.cursor_position()
+        .map(|p| desktop_cursor(p.x, p.y, primary_scale, LOGICAL_DESKTOP))
+        .unwrap_or((0.0, 0.0))
 }
 
-fn window_size(content: &BoxI, scale: u32, ppt: f64) -> PhysicalSize<u32> {
-    let k = scale as f64 * ppt;
-    PhysicalSize::new((content.width() as f64 * k).round() as u32, (content.height() as f64 * k).round() as u32)
+/// Moves and sizes a pet window in desktop space (logical points on macOS, physical pixels elsewhere).
+fn place(window: &WebviewWindow, left: i32, top: i32) {
+    let _ = if LOGICAL_DESKTOP {
+        window.set_position(LogicalPosition::new(left as f64, top as f64))
+    } else {
+        window.set_position(PhysicalPosition::new(left, top))
+    };
+}
+
+fn resize(window: &WebviewWindow, content: &BoxI, k: f64) {
+    let (w, h) = (content.width() as f64 * k, content.height() as f64 * k);
+    let _ = if LOGICAL_DESKTOP {
+        window.set_size(LogicalSize::new(w, h))
+    } else {
+        window.set_size(PhysicalSize::new(w.round() as u32, h.round() as u32))
+    };
+}
+
+/// The ground with px_per_pt adjusted so scale × px_per_pt is a whole number of desktop units per sprite pixel.
+fn snapped(g: Ground, scale: u32) -> Ground {
+    Ground { px_per_pt: sprite_px(scale, g.px_per_pt) / scale as f64, ..g }
 }
 
 /// Downloads (if needed) and spawns a pet. `at` is a physical (x, feet y); default: random spot under the cursor.
@@ -110,7 +133,7 @@ pub async fn spawn_pet(app: &AppHandle, variant: &str, at: Option<(f64, f64)>) -
         let g = ground_at(app, c.0, c.1);
         (rand::rng().random_range(g.left..g.right.max(g.left + 1.0)), g.y)
     });
-    let g = ground_at(app, x, y);
+    let g = snapped(ground_at(app, x, y), scale);
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let label = format!("pet-{id}");
     let pts = (content.width() as f64 * scale as f64, content.height() as f64 * scale as f64);
@@ -235,16 +258,18 @@ pub fn window_origin(x: f64, y: f64, content: &BoxI, feet: i32, k: f64) -> (i32,
 }
 
 fn step(app: &AppHandle, pet: &mut Pet, dt: f64, monitors: &[MonitorInfo], scale: u32, hidden: bool) {
-    let g = ground_for(pet.brain.x, pet.brain.y, monitors).unwrap_or(Ground { left: 0.0, right: 1280.0, y: 800.0, px_per_pt: 1.0 });
+    let fallback = Ground { left: 0.0, right: 1280.0, y: 800.0, px_per_pt: 1.0 };
+    let g = snapped(ground_for(pet.brain.x, pet.brain.y, monitors).unwrap_or(fallback), scale);
     pet.brain.tick(dt, &g);
     let k = scale as f64 * g.px_per_pt;
     if (g.px_per_pt - pet.last_ppt).abs() > 1e-9 {
-        let _ = pet.window.set_size(window_size(&pet.content, scale, g.px_per_pt));
+        resize(&pet.window, &pet.content, k);
         pet.last_ppt = g.px_per_pt;
+        pet.last_pos = (i32::MIN, i32::MIN); // a scale change moves the window: re-send the position
     }
     let (left, top) = window_origin(pet.brain.x, pet.brain.y, &pet.content, pet.feet, k);
     if (left, top) != pet.last_pos {
-        let _ = pet.window.set_position(PhysicalPosition::new(left, top));
+        place(&pet.window, left, top);
         pet.last_pos = (left, top);
     }
     if !pet.shown && !hidden {

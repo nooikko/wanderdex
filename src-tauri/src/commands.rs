@@ -26,7 +26,7 @@ fn with_pet<T>(window: &WebviewWindow, f: impl FnOnce(&mut pets::Pet) -> T) -> O
 }
 
 fn cursor(window: &WebviewWindow) -> (f64, f64) {
-    window.app_handle().cursor_position().map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0))
+    pets::cursor(window.app_handle())
 }
 
 #[tauri::command]

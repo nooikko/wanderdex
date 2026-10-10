@@ -21,15 +21,26 @@ export function canvasSize(box: ContentBox, scale: number) {
   return { width: (box.maxX - box.minX) * scale, height: (box.maxY - box.minY) * scale };
 }
 
-/** Sizes the canvas (CSS px × device pixel ratio) and returns a context with smoothing off. */
+/**
+ * Canvas size with every sprite pixel snapped to a whole number of device pixels (round(scale × dpr)),
+ * so pixels stay even at fractional DPI. `ratio` maps drawing units (CSS px at `scale`) to device px.
+ */
+export function canvasMetrics(box: ContentBox, scale: number, dpr: number) {
+  const devicePerSprite = Math.max(1, Math.round(scale * dpr));
+  const width = (box.maxX - box.minX) * devicePerSprite;
+  const height = (box.maxY - box.minY) * devicePerSprite;
+  return { width, height, cssWidth: width / dpr, cssHeight: height / dpr, ratio: devicePerSprite / scale };
+}
+
+/** Sizes the canvas and returns a context with smoothing off. */
 export function setupCanvas(canvas: HTMLCanvasElement, box: ContentBox, scale: number, dpr: number): CanvasRenderingContext2D {
-  const { width, height } = canvasSize(box, scale);
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
-  canvas.width = Math.round(width * dpr);
-  canvas.height = Math.round(height * dpr);
+  const m = canvasMetrics(box, scale, dpr);
+  canvas.style.width = `${m.cssWidth}px`;
+  canvas.style.height = `${m.cssHeight}px`;
+  canvas.width = m.width;
+  canvas.height = m.height;
   const ctx = canvas.getContext("2d")!;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.setTransform(m.ratio, 0, 0, m.ratio, 0, 0);
   ctx.imageSmoothingEnabled = false;
   return ctx;
 }

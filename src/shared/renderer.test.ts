@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { canvasSize, frameDest, frameSource } from "./renderer";
+import { canvasMetrics, canvasSize, frameDest, frameSource } from "./renderer";
 import type { AnimInfo, ContentBox } from "./types";
 
 const idle: AnimInfo = { name: "Idle", source: "Idle", frameWidth: 24, frameHeight: 40, durations: [40], rows: 8 };
@@ -18,4 +18,11 @@ test("frameDest centers the frame on the shared anchor at integer scale", () => 
 
 test("canvasSize is the content box times scale", () => {
   expect(canvasSize(box, 3)).toEqual({ width: 48, height: 69 });
+});
+
+test("canvasMetrics snaps each sprite pixel to whole device pixels at fractional DPI", () => {
+  // 125% Windows: 3x would be 3.75 device px per sprite px → snapped to 4.
+  expect(canvasMetrics(box, 3, 1.25)).toEqual({ width: 64, height: 92, cssWidth: 51.2, cssHeight: 73.6, ratio: 4 / 3 });
+  // Retina: 3x → exactly 6 device px, CSS size unchanged.
+  expect(canvasMetrics(box, 3, 2)).toEqual({ width: 96, height: 138, cssWidth: 48, cssHeight: 69, ratio: 2 });
 });
