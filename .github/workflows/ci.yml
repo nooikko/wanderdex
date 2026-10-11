@@ -20,9 +20,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with: { toolchain: stable }
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with: { workspaces: src-tauri }
+        with:
+          workspaces: |
+            src-tauri
+            setup/src-tauri
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo check --locked --manifest-path setup/src-tauri/Cargo.toml
