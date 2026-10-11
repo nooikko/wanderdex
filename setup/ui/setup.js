@@ -130,7 +130,6 @@
   }
 
   const opts = { dir: "", desktopShortcut: false, launchAtLogin: true };
-  let exe = "";
 
   invoke("defaults").then((d) => {
     opts.dir = d.dir;
@@ -151,7 +150,7 @@
       $("status").textContent = STEPS.filter((s) => st.progress >= s[0]).pop()[1];
     }, 60);
     try {
-      exe = await invoke("install", { options: opts });
+      await invoke("install", { options: opts });
       clearInterval(timer);
       $("status").textContent = "Finishing up";
       await new Promise((ok) => {
@@ -189,9 +188,9 @@
   $("done-login").onchange = (e) => {
     opts.launchAtLogin = e.target.checked;
     $("opt-login").checked = e.target.checked;
-    invoke("set_launch_at_login", { exe, enabled: e.target.checked }).catch(() => {});
+    invoke("set_launch_at_login", { enabled: e.target.checked }).catch(() => {});
   };
-  $("launch").onclick = () => invoke("launch", { exe }).catch((e) => { $("error").textContent = String(e); show("error"); });
+  $("launch").onclick = () => invoke("launch").catch((e) => { $("error").textContent = String(e); show("error"); });
   $("min").onclick = () => appWindow.minimize();
   $("close").onclick = () => st.screen !== "install" && appWindow.close(); // don't abandon a running install
 })();

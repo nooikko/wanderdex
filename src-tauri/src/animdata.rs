@@ -50,6 +50,8 @@ pub enum AnimError {
     Xml(String),
     #[error("<Anim> without <Name>")]
     MissingName,
+    #[error("{0}: sheet names must be letters and digits")]
+    BadSheetName(String),
     #[error("{0}: bad CopyOf chain")]
     BadCopyOf(String),
     #[error("{0}: missing or invalid {1}")]
@@ -87,6 +89,10 @@ pub fn parse(xml: &str) -> Result<AnimTable, AnimError> {
                 return Err(AnimError::BadCopyOf(name.clone()));
             }
             source = target;
+        }
+        // The sheet name becomes part of a file path and a download URL.
+        if source.is_empty() || !source.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(AnimError::BadSheetName(source));
         }
         let node = find(&source).expect("source exists");
         let number = |tag: &'static str| {
@@ -129,7 +135,7 @@ impl AnimTable {
         for a in &mut self.anims {
             let (width, height) = sheet_size(&a.source).ok_or_else(|| AnimError::MissingSheet(a.source.clone()))?;
             let columns = a.durations.len() as u32;
-            if width != a.frame_width * columns || height == 0 || height % a.frame_height != 0 {
+            if a.frame_width.checked_mul(columns) != Some(width) || height == 0 || height % a.frame_height != 0 {
                 return Err(AnimError::SheetSize {
                     name: a.source.clone(),
                     width,
@@ -246,5 +252,7 @@ mod tests {
         let no_durations = r#"<AnimData><Anims><Anim><Name>A</Name><FrameWidth>8</FrameWidth>
             <FrameHeight>8</FrameHeight></Anim></Anims></AnimData>"#;
         assert!(matches!(parse(no_durations), Err(AnimError::NoDurations(_))));
+        let traversal = "<AnimData><Anims><Anim><Name>../x</Name><FrameWidth>8</FrameWidth><FrameHeight>8</FrameHeight><Durations><Duration>1</Duration></Durations></Anim></Anims></AnimData>";
+        assert!(matches!(parse(traversal), Err(AnimError::BadSheetName(_))));
     }
 }

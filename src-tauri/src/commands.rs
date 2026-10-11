@@ -123,6 +123,10 @@ pub fn get_index() -> tauri::ipc::Response {
 
 #[tauri::command]
 pub async fn ensure_portrait_cmd(app: AppHandle, dex: String) -> Result<String, String> {
+    // `dex` becomes part of a cache path and a download URL, so only accept ones from the index.
+    if !bundled().species.iter().any(|s| s.dex == dex && s.has_portrait) {
+        return Err(format!("No portrait for {dex}"));
+    }
     let state = app.state::<AppState>();
     let path = ensure_portrait(&state.http, &state.cache_root, &bundled().sprite_collab_sha, &dex)
         .await
@@ -200,8 +204,12 @@ pub fn get_credits(app: AppHandle) -> Vec<CreditEntry> {
 }
 
 #[tauri::command]
-pub fn save_contact_sheet(app: AppHandle, data_url: String, report: String, ok: bool) -> Result<(), String> {
+pub fn save_contact_sheet(app: AppHandle, window: tauri::Window, data_url: String, report: String, ok: bool) -> Result<(), String> {
     use std::io::Write;
+    // Only the contact-sheet window (debug builds, `--contact`) may write the file and quit.
+    if !cfg!(debug_assertions) || window.label() != "contact" {
+        return Err("not available".into());
+    }
     let b64 = data_url.split_once(',').map(|(_, b)| b).ok_or("bad data URL")?;
     let bytes = base64_decode(b64)?;
     std::fs::write("contact-sheet.png", bytes).map_err(|e| e.to_string())?;
