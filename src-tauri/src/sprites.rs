@@ -46,11 +46,20 @@ impl Default for HttpFetch {
 
 impl Fetch for HttpFetch {
     async fn get(&self, url: &str) -> Result<Vec<u8>, String> {
-        let resp = self.0.get(url).send().await.map_err(|e| e.to_string())?;
+        let mut resp = self.0.get(url).send().await.map_err(|e| e.to_string())?;
         if !resp.status().is_success() {
             return Err(format!("HTTP {} for {url}", resp.status()));
         }
-        resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+        // Sprite sheets are a few hundred KB; refuse anything absurd instead of buffering it.
+        const MAX_BYTES: usize = 16 << 20;
+        let mut body = Vec::new();
+        while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+            if body.len() + chunk.len() > MAX_BYTES {
+                return Err(format!("{url} is larger than {} MB", MAX_BYTES >> 20));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok(body)
     }
 }
 

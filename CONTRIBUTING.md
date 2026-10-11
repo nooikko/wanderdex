@@ -45,6 +45,16 @@ cargo test --manifest-path src-tauri/Cargo.toml # Rust tests
 
 CodeQL also scans the Rust, TypeScript and workflow code.
 
+CI's `dependencies` job also checks for vulnerable or unmaintained dependencies, licenses outside
+`deny.toml`, and crates from unknown sources. To run it locally (`cargo install --locked cargo-deny cargo-audit`):
+
+```sh
+cargo deny --manifest-path src-tauri/Cargo.toml check
+cargo deny --manifest-path setup/src-tauri/Cargo.toml check
+cargo audit --file src-tauri/Cargo.lock   # from the repo root, so it picks up .cargo/audit.toml
+pnpm audit
+```
+
 ### Other useful commands
 
 ```sh

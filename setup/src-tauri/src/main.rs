@@ -3,7 +3,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 static PAYLOAD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/payload.exe"));
@@ -11,6 +12,10 @@ static PAYLOAD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/payload.exe"))
 /// Must match the name the app's autostart plugin registers (its product name).
 #[cfg(windows)]
 const APP_NAME: &str = "Wanderdex";
+
+/// The app `install` put on disk. The later commands use this rather than a path from the page.
+#[derive(Default)]
+struct Installed(Mutex<Option<PathBuf>>);
 
 #[derive(serde::Serialize)]
 struct Defaults {
@@ -43,11 +48,10 @@ struct Options {
 }
 
 /// Runs the embedded installer silently, then applies the options NSIS can't take on its command line.
-/// Returns the installed app's path for `launch`.
 #[tauri::command]
-async fn install(app: AppHandle, options: Options) -> Result<String, String> {
+async fn install(app: AppHandle, options: Options) -> Result<(), String> {
     let dir = PathBuf::from(&options.dir);
-    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         run_installer(&dir)?;
         let exe = find_exe(&dir).ok_or("Setup finished, but Wanderdex isn't in the install folder.")?;
         if !options.desktop_shortcut {
@@ -57,20 +61,22 @@ async fn install(app: AppHandle, options: Options) -> Result<String, String> {
             }
         }
         set_autostart(&exe, options.launch_at_login)?;
-        Ok(exe.display().to_string())
+        *app.state::<Installed>().0.lock().unwrap() = Some(exe);
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn set_launch_at_login(exe: String, enabled: bool) -> Result<(), String> {
-    set_autostart(Path::new(&exe), enabled)
+fn set_launch_at_login(installed: State<Installed>, enabled: bool) -> Result<(), String> {
+    let exe = installed.0.lock().unwrap().clone().ok_or("Wanderdex isn't installed yet.")?;
+    set_autostart(&exe, enabled)
 }
 
 #[tauri::command]
-fn launch(app: AppHandle, exe: String) -> Result<(), String> {
-    if !exe.is_empty() {
+fn launch(app: AppHandle, installed: State<Installed>) -> Result<(), String> {
+    if let Some(exe) = installed.0.lock().unwrap().clone() {
         std::process::Command::new(&exe).spawn().map_err(|e| format!("Couldn't open Wanderdex: {e}"))?;
     }
     app.exit(0);
@@ -91,15 +97,21 @@ fn run_installer(dir: &Path) -> Result<(), String> {
     if PAYLOAD.is_empty() {
         return Err("This build of setup doesn't contain the installer.".into());
     }
-    let tmp = std::env::temp_dir().join(format!("wanderdex-install-{}.exe", std::process::id()));
-    std::fs::write(&tmp, PAYLOAD).map_err(|e| format!("Couldn't unpack the installer: {e}"))?;
-    // NSIS wants /D= last and unquoted, even when the path has spaces.
-    let status = std::process::Command::new(&tmp)
-        .arg("/S")
-        .raw_arg(format!("/D={}", dir.display()))
-        .status();
-    let _ = std::fs::remove_file(&tmp);
-    match status.map_err(|e| format!("Couldn't start the installer: {e}"))?.code() {
+    use std::hash::{BuildHasher, RandomState};
+    // A fresh folder with an unguessable name, so nothing can be planted or swapped in beforehand.
+    let tmp_dir = std::env::temp_dir().join(format!("wanderdex-setup-{:016x}", RandomState::new().hash_one(std::process::id())));
+    std::fs::create_dir(&tmp_dir).map_err(|e| format!("Couldn't unpack the installer: {e}"))?;
+    let tmp = tmp_dir.join("wanderdex-install.exe");
+    let status = std::fs::write(&tmp, PAYLOAD).map_err(|e| format!("Couldn't unpack the installer: {e}")).and_then(|()| {
+        // NSIS wants /D= last and unquoted, even when the path has spaces.
+        std::process::Command::new(&tmp)
+            .arg("/S")
+            .raw_arg(format!("/D={}", dir.display()))
+            .status()
+            .map_err(|e| format!("Couldn't start the installer: {e}"))
+    });
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    match status?.code() {
         Some(0) => Ok(()),
         Some(code) => Err(format!(
             "The installer stopped (code {code}). If Wanderdex is open, quit it from the tray and try again."
@@ -135,6 +147,7 @@ fn set_autostart(_exe: &Path, _enabled: bool) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(Installed::default())
         .invoke_handler(tauri::generate_handler![defaults, pick_folder, install, set_launch_at_login, launch])
         .run(tauri::generate_context!())
         .expect("error while running Wanderdex Setup");

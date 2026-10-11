@@ -1,0 +1,8 @@
+# cargo-audit. Both ignored advisories are in Tauri's Linux-only GTK crates (glib 0.18 and its macros),
+# which are never built for the macOS and Windows apps. `cargo deny` (deny.toml) checks those targets
+# only and doesn't need this.
+[advisories]
+ignore = [
+  "RUSTSEC-2024-0429", # glib: unsound VariantStrIter
+  "RUSTSEC-2024-0370", # proc-macro-error unmaintained (via glib-macros)
+]
