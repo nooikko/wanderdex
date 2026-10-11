@@ -58,7 +58,9 @@ Never commit downloaded sprites. They are CC BY-NC and are fetched at runtime; `
 
 1. Fork the repository and create a branch from `main`.
 2. Make your change, with tests where the behavior can be tested (the pet behavior in `src-tauri/src/brain.rs`
-   and the renderer in `src/shared/` both have unit tests to extend).
+   and the renderer in `src/shared/` both have unit tests to extend). On macOS, pets are drawn natively
+   (`src-tauri/src/native.rs`) so clicks pass through their transparent pixels; on Windows, and in the picker
+   preview, they're drawn by the web renderer in `src/shared/`.
 3. Run the checks above.
 4. Open a pull request against `main` and fill in the template. Link the issue it fixes.
 

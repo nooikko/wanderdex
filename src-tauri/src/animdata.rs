@@ -21,6 +21,22 @@ impl AnimInfo {
     pub fn total_secs(&self) -> f64 {
         self.durations.iter().sum::<u32>() as f64 / 60.0
     }
+
+    /// Frame column at a tick (60/s); a finished one-shot holds its last frame.
+    pub fn column_at(&self, tick: u64, looped: bool) -> usize {
+        let total = self.durations.iter().map(|d| *d as u64).sum::<u64>().max(1);
+        if !looped && tick >= total {
+            return self.durations.len() - 1;
+        }
+        let mut t = if looped { tick % total } else { tick };
+        for (i, d) in self.durations.iter().enumerate() {
+            if t < *d as u64 {
+                return i;
+            }
+            t -= *d as u64;
+        }
+        self.durations.len() - 1
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -175,6 +191,15 @@ mod tests {
     fn total_secs_uses_60_ticks_per_second() {
         let t = parse(WOBBUFFET_XML).unwrap();
         assert!((t.get("Idle").unwrap().total_secs() - 72.0 / 60.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn column_at_walks_durations_loops_and_holds_one_shots() {
+        let t = parse(WOBBUFFET_XML).unwrap();
+        let idle = t.get("Idle").unwrap(); // 40, then eight 4s: 72 ticks
+        assert_eq!([0, 39, 40, 44, 71, 72].map(|tick| idle.column_at(tick, true)), [0, 0, 1, 2, 8, 0]);
+        let sleep = t.get("Sleep").unwrap(); // 30, 35
+        assert_eq!([29, 30, 64, 65, 10_000].map(|tick| sleep.column_at(tick, false)), [0, 1, 1, 1, 1]);
     }
 
     #[test]

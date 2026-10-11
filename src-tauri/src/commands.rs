@@ -5,8 +5,8 @@ use crate::brain::Visual;
 use crate::pets::{self, AppState};
 use crate::animdata::AnimInfo;
 use serde::Serialize;
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder};
+use tauri::{AppHandle, Manager, WebviewWindow, Wry};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,19 +66,21 @@ pub async fn pet_drop(window: WebviewWindow) {
 
 #[tauri::command]
 pub async fn pet_context_menu(window: WebviewWindow) -> Result<(), String> {
-    let app = window.app_handle();
-    let label = window.label();
-    let menu = MenuBuilder::new(app)
-        .item(&MenuItemBuilder::with_id(format!("pet-move:{label}"), "Do a move").build(app).map_err(|e| e.to_string())?)
-        .item(&MenuItemBuilder::with_id(format!("pet-credits:{label}"), "Credits for this Pokémon").build(app).map_err(|e| e.to_string())?)
-        .separator()
-        .item(&MenuItemBuilder::with_id(format!("pet-remove:{label}"), "Remove").build(app).map_err(|e| e.to_string())?)
-        .item(&MenuItemBuilder::with_id("pets-remove-all", "Remove all").build(app).map_err(|e| e.to_string())?)
-        .separator()
-        .item(&MenuItemBuilder::with_id("open-picker", "Open picker").build(app).map_err(|e| e.to_string())?)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let menu = pet_menu(window.app_handle(), window.label()).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())
+}
+
+/// A pet's right-click menu.
+pub fn pet_menu(app: &AppHandle, label: &str) -> tauri::Result<Menu<Wry>> {
+    MenuBuilder::new(app)
+        .item(&MenuItemBuilder::with_id(format!("pet-move:{label}"), "Do a move").build(app)?)
+        .item(&MenuItemBuilder::with_id(format!("pet-credits:{label}"), "Credits for this Pokémon").build(app)?)
+        .separator()
+        .item(&MenuItemBuilder::with_id(format!("pet-remove:{label}"), "Remove").build(app)?)
+        .item(&MenuItemBuilder::with_id("pets-remove-all", "Remove all").build(app)?)
+        .separator()
+        .item(&MenuItemBuilder::with_id("open-picker", "Open picker").build(app)?)
+        .build()
 }
 
 /// Shared by menus: make a pet do its move.

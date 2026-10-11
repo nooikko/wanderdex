@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.7.2", features = [] }
 
 [dependencies]
-tauri = { version = "2.12.3", features = ["tray-icon", "macos-private-api", "protocol-asset", "image-png"] }
+tauri = { version = "2.12.3", features = ["tray-icon", "macos-private-api", "protocol-asset", "image-png", "unstable"] }
 tauri-plugin-autostart = "2.7.0"
 tauri-plugin-opener = "2.7.1"
 serde = { version = "1", features = ["derive"] }
@@ -24,6 +24,14 @@ rand = "0.10.3"
 rand_chacha = "0.10.0"
 reqwest = "0.13.5"
 thiserror = "2"
+
+# Native pet windows (see src/native.rs). Same versions tauri already uses.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSGeometry", "NSString"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSEvent", "NSImage", "NSResponder", "NSScreen", "NSView"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "CALayer", "CATransaction"] }
 
 [dev-dependencies]
 tempfile = "3"

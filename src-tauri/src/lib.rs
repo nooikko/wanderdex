@@ -4,6 +4,8 @@ pub mod brain;
 pub mod commands;
 pub mod ground;
 pub mod index;
+#[cfg(target_os = "macos")]
+pub mod native;
 pub mod persist;
 pub mod pets;
 pub mod sprites;
@@ -45,6 +47,8 @@ pub fn run() {
                     .build()?;
                 return Ok(());
             }
+            #[cfg(target_os = "macos")]
+            native::init(app.handle());
             tray::build_tray(app.handle())?;
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
