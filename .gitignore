@@ -4,10 +4,9 @@ node_modules/
 dist/
 /src-tauri/target
 /src-tauri/gen
+/setup/src-tauri/target
+/setup/src-tauri/gen
 /contact-sheet.png
-
-# Downloaded sprites from the old prototype (CC BY-NC; fetched at runtime, never committed)
-/assets/
 
 .DS_Store
 .superpowers/

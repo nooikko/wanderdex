@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Wanderdex Setup</title>
+    <link rel="stylesheet" href="setup.css" />
+  </head>
+  <body>
+    <canvas id="scene" width="320" height="200" aria-hidden="true"></canvas>
+
+    <header class="chrome" data-tauri-drag-region>
+      <span data-tauri-drag-region>Wanderdex Setup</span>
+      <div class="ctl">
+        <button id="min" aria-label="Minimize">&#x2014;</button>
+        <button id="close" class="x" aria-label="Close">&#x2715;</button>
+      </div>
+    </header>
+
+    <section class="screen" id="s-welcome" aria-label="Welcome">
+      <div class="logo">WANDERDEX</div>
+      <div class="tag">Pokémon that wander your desktop</div>
+      <div class="cta">
+        <button class="px-btn" id="install">Install</button>
+        <button class="link" id="open-options">Install options</button>
+      </div>
+      <div class="meta" id="meta"></div>
+    </section>
+
+    <section class="screen" id="s-options" aria-label="Install options" hidden>
+      <div class="sheet">
+        <h2>Install options</h2>
+        <div class="path"><code id="path"></code><button id="browse">Change…</button></div>
+        <label><input type="checkbox" id="opt-desk" /> Add a desktop shortcut</label>
+        <label><input type="checkbox" id="opt-login" checked /> Launch Wanderdex when I sign in</label>
+        <div class="hint">Adds Wanderdex to the Start menu, for your account only. Uninstall it any time from Settings → Apps.</div>
+        <div class="row"><button class="px-btn" id="options-done">Done</button></div>
+      </div>
+    </section>
+
+    <section class="screen" id="s-install" aria-label="Installing" hidden>
+      <div class="big">Setting up…</div>
+      <div class="pct" id="pct" aria-live="polite">0%</div>
+      <div class="status" id="status"></div>
+    </section>
+
+    <section class="screen" id="s-done" aria-label="Done" hidden>
+      <div class="big">Ready to wander!</div>
+      <div class="cta">
+        <button class="px-btn" id="launch">Open Wanderdex</button>
+        <label class="check"><input type="checkbox" id="done-login" checked /> Launch when I sign in</label>
+      </div>
+    </section>
+
+    <section class="screen" id="s-error" aria-label="Setup couldn't finish" hidden>
+      <div class="big">Setup couldn't finish</div>
+      <p class="error" id="error"></p>
+      <div class="cta">
+        <button class="px-btn" id="retry">Try again</button>
+      </div>
+    </section>
+
+    <script src="setup.js"></script>
+  </body>
+</html>

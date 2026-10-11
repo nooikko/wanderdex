@@ -38,8 +38,9 @@ pub fn run() {
             let cache_root = app.path().app_data_dir()?;
             let settings_path = app.path().app_config_dir()?.join("settings.json");
             app.manage(pets::AppState::new(cache_root, settings_path));
+            // Render-check tool for contributors (`pnpm contact-sheet`); debug builds only.
             let args: Vec<String> = std::env::args().collect();
-            if let Some(i) = args.iter().position(|a| a == "--contact") {
+            if let Some(i) = args.iter().position(|a| cfg!(debug_assertions) && a == "--contact") {
                 let variant = args.get(i + 1).cloned().unwrap_or_else(|| "0202".into());
                 tauri::WebviewWindowBuilder::new(app, "contact", tauri::WebviewUrl::App(format!("contact.html?variant={variant}").into()))
                     .title("Contact sheet")
@@ -69,15 +70,6 @@ pub fn run() {
             });
             pets::start_loop(app.handle().clone());
             pets::restore(app.handle().clone());
-            // Dev convenience until the picker exists: WANDERDEX_SPAWN=0202 pnpm tauri dev
-            if let Ok(variant) = std::env::var("WANDERDEX_SPAWN") {
-                let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = pets::spawn_pet(&handle, &variant).await {
-                        eprintln!("spawn failed: {e}");
-                    }
-                });
-            }
             Ok(())
         })
         .build(tauri::generate_context!())
