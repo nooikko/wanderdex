@@ -16,7 +16,7 @@ export default defineConfig({
     outDir: fileURLToPath(new URL("./dist", import.meta.url)),
     emptyOutDir: true,
     target: "es2022",
-    rollupOptions: {
+    rolldownOptions: {
       input: {
         picker: page("index.html"),
         pet: page("pet.html"),

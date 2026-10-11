@@ -5,11 +5,15 @@ updates:
     schedule:
       interval: "weekly"
     groups:
+      # Vite, its React plugin and Vitest are upgraded together: @vitejs/plugin-react only works with one
+      # Vite major. Listed first so it also catches their major versions.
+      vite:
+        patterns: ["vite", "vitest", "@vitejs/*", "@vitest/*"]
       npm-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
   - package-ecosystem: "cargo"
-    directory: "/src-tauri"
+    directories: ["/src-tauri", "/setup/src-tauri"]
     schedule:
       interval: "weekly"
     groups:
