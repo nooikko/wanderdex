@@ -141,13 +141,16 @@ pub async fn ensure_portrait<F: Fetch>(fetch: &F, cache_root: &Path, sha: &str, 
     let file = cache_root.join("portraits").join(sha).join(format!("{dex}.png"));
     let lock = path_lock(&file);
     let _guard = lock.lock().await;
-    if std::fs::read(&file).ok().is_some_and(|b| decode_alpha(&b).is_ok()) {
+    // Validated before it was written, and written atomically: if it exists, it's good.
+    if file.is_file() {
         return Ok(file);
     }
     let bytes = fetch.get(&raw_url(sha, &format!("portrait/{dex}/Normal.png"))).await.map_err(SpriteError::Download)?;
     decode_alpha(&bytes).map_err(SpriteError::Invalid)?;
     std::fs::create_dir_all(file.parent().expect("has parent")).map_err(|e| SpriteError::Io(e.to_string()))?;
-    std::fs::write(&file, bytes).map_err(|e| SpriteError::Io(e.to_string()))?;
+    let tmp = file.with_extension("png.tmp");
+    std::fs::write(&tmp, bytes).map_err(|e| SpriteError::Io(e.to_string()))?;
+    std::fs::rename(&tmp, &file).map_err(|e| SpriteError::Io(e.to_string()))?;
     Ok(file)
 }
 
@@ -321,5 +324,18 @@ mod tests {
         assert!(p.ends_with("portraits/sha1/0202.png") && p.exists());
         run(ensure_portrait(&fetch, cache.path(), "sha1", "0202")).unwrap();
         assert_eq!(fetch.calls().len(), 1);
+        assert!(!p.with_extension("png.tmp").exists(), "written via a temp file, then renamed");
+    }
+
+    #[test]
+    fn invalid_portrait_is_never_cached() {
+        let cache = tempfile::tempdir().unwrap();
+        let fetch = FakeFetch::good();
+        fetch.files.lock().unwrap().insert(
+            "https://raw.githubusercontent.com/PMDCollab/SpriteCollab/sha1/portrait/0202/Normal.png".into(),
+            b"not a png".to_vec(),
+        );
+        assert!(matches!(run(ensure_portrait(&fetch, cache.path(), "sha1", "0202")), Err(SpriteError::Invalid(_))));
+        assert!(!cache.path().join("portraits/sha1/0202.png").exists());
     }
 }
