@@ -1,4 +1,4 @@
-//! One pet's behavior: walk / idle / flourish / nap on the ground, plus drag, fall and land.
+//! One pet's behavior: a walk / pause rhythm with occasional moves and naps, plus drag, fall and land.
 //! Pure logic in physical pixels; the pets module moves windows to match.
 
 use crate::animdata::AnimTable;
@@ -14,15 +14,20 @@ pub const LEFT: u8 = 6;
 /// Attack/Swing/Double are left out: they lunge the body around the frame, which looks wrong on a desktop.
 pub const FLOURISH_PREFERENCE: [&str; 4] = ["Pose", "Hop", "Rotate", "Charge"];
 
-/// Tuning (spec §5.2).
-const WEIGHT_WALK: u32 = 50;
-const WEIGHT_IDLE: u32 = 30;
-const WEIGHT_FLOURISH: u32 = 15;
-const WEIGHT_NAP: u32 = 5;
-const IDLE_SECS: std::ops::Range<f64> = 2.0..8.0;
-const NAP_SECS: std::ops::Range<f64> = 20.0..60.0;
+/// Tuning (spec §5.2). A pet keeps a calm rhythm: walk, pause, walk again. Moves are an occasional treat
+/// at the end of a pause, and it naps once it has been awake for a while.
+const PAUSE_SECS: std::ops::Range<f64> = 2.0..5.0;
 const WALK_PTS: std::ops::Range<f64> = 40.0..240.0;
 const WALK_PTS_PER_SEC_PER_SCALE: f64 = 10.0;
+/// Seconds after a move before the next one may come on its own (a click doesn't wait).
+const MOVE_COOLDOWN_SECS: std::ops::Range<f64> = 20.0..40.0;
+/// Chance that a pause whose move cooldown is over ends in a move.
+const MOVE_CHANCE: f64 = 0.35;
+/// Share of moves that are the signature move, when there are others to choose from.
+const SIGNATURE_SHARE: f64 = 0.5;
+/// Seconds awake before getting sleepy; the first pause after that ends in a nap.
+const AWAKE_SECS: std::ops::Range<f64> = 300.0..480.0;
+const NAP_SECS: std::ops::Range<f64> = 30.0..90.0;
 const GRAVITY_PTS_PER_SEC2: f64 = 2400.0;
 const DRAG_TURN_PX: f64 = 6.0;
 
@@ -73,11 +78,36 @@ pub struct Visual {
     pub seq: u64,
 }
 
+/// What a sprite can do. Walk and Idle are guaranteed (the index only lists variants with both); every
+/// other behavior drops out of the rhythm when its animation is missing.
+#[derive(Debug, Clone)]
+struct Abilities {
+    /// Signature first (if the sprite has it), then the flourishes it has.
+    moves: Vec<String>,
+    signature: Option<String>,
+    nap: bool,
+    hop: bool,
+}
+
+impl Abilities {
+    fn of(anims: &AnimSet, signature: Option<String>) -> Self {
+        let signature = signature.filter(|s| anims.has(s));
+        let mut moves: Vec<String> = signature.iter().cloned().collect();
+        for f in FLOURISH_PREFERENCE {
+            if anims.has(f) && !moves.iter().any(|m| m == f) {
+                moves.push(f.to_string());
+            }
+        }
+        Abilities { moves, signature, nap: anims.has("Sleep"), hop: anims.has("Hop") }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Mode {
     Walk { remaining_pts: f64 },
-    Idle { remaining: f64 },
-    OneShot { anim: String, remaining: f64 },
+    /// Standing and looking around between walks (the Idle animation).
+    Pause { remaining: f64 },
+    Move { anim: String, remaining: f64 },
     Nap { remaining: f64 },
     Dragged,
     Falling { vy: f64 },
@@ -93,30 +123,41 @@ pub struct Brain {
     facing: u8,
     rng: ChaCha8Rng,
     anims: AnimSet,
-    signature: Option<String>,
+    can: Abilities,
     scale: f64,
     extent: (f64, f64),
     seq: u64,
     drag_offset: (f64, f64),
     last_drag: (f64, f64),
+    /// Seconds this brain has ticked; the timers below are on this clock.
+    clock: f64,
+    next_move_at: f64,
+    last_move: Option<String>,
+    bedtime: f64,
 }
 
 impl Brain {
     pub fn new(seed: u64, anims: AnimSet, signature: Option<String>, scale: u32, extent: (f64, f64), x: f64, ground: &Ground) -> Brain {
-        let signature = signature.filter(|s| anims.has(s));
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let next_move_at = rng.random_range(MOVE_COOLDOWN_SECS);
+        let bedtime = rng.random_range(AWAKE_SECS);
         let mut b = Brain {
-            mode: Mode::Idle { remaining: 1.0 },
+            mode: Mode::Pause { remaining: 1.0 },
             x,
             y: ground.y,
             facing: DOWN,
-            rng: ChaCha8Rng::seed_from_u64(seed),
+            rng,
+            can: Abilities::of(&anims, signature),
             anims,
-            signature,
             scale: scale as f64,
             extent,
             seq: 0,
             drag_offset: (0.0, 0.0),
             last_drag: (0.0, 0.0),
+            clock: 0.0,
+            next_move_at,
+            last_move: None,
+            bedtime,
         };
         b.clamp_x(ground);
         b
@@ -153,9 +194,9 @@ impl Brain {
         self.seq += 1;
     }
 
-    fn start_idle(&mut self) {
-        let remaining = self.rng.random_range(IDLE_SECS);
-        self.set_mode(Mode::Idle { remaining }, DOWN);
+    fn start_pause(&mut self) {
+        let remaining = self.rng.random_range(PAUSE_SECS);
+        self.set_mode(Mode::Pause { remaining }, DOWN);
     }
 
     fn start_walk(&mut self) {
@@ -164,62 +205,67 @@ impl Brain {
         self.set_mode(Mode::Walk { remaining_pts }, facing);
     }
 
-    fn start_one_shot(&mut self, anim: String) {
+    /// Plays a move now and restarts the move cooldown.
+    fn start_move(&mut self, anim: String) {
         let remaining = self.anims.secs(&anim);
-        self.set_mode(Mode::OneShot { anim, remaining }, DOWN);
+        self.next_move_at = self.clock + remaining + self.rng.random_range(MOVE_COOLDOWN_SECS);
+        self.last_move = Some(anim.clone());
+        self.set_mode(Mode::Move { anim, remaining }, DOWN);
     }
 
-    fn pick_flourish(&mut self) -> Option<String> {
-        if let Some(sig) = &self.signature {
-            return Some(sig.clone());
+    /// A move other than the last one (unless it's the only one); the signature gets its share.
+    fn pick_move(&mut self) -> Option<String> {
+        let fresh: Vec<&String> = self.can.moves.iter().filter(|m| self.can.moves.len() == 1 || Some(*m) != self.last_move.as_ref()).collect();
+        if fresh.is_empty() {
+            return None;
         }
-        let options: Vec<&str> = FLOURISH_PREFERENCE.iter().copied().filter(|n| self.anims.has(n)).collect();
-        if options.is_empty() {
-            None
+        if let Some(sig) = self.can.signature.as_ref().filter(|s| fresh.contains(s)) {
+            if fresh.len() == 1 || self.rng.random_bool(SIGNATURE_SHARE) {
+                return Some(sig.clone());
+            }
+            let others: Vec<&String> = fresh.into_iter().filter(|m| *m != sig).collect();
+            return Some(others[self.rng.random_range(0..others.len())].clone());
+        }
+        Some(fresh[self.rng.random_range(0..fresh.len())].clone())
+    }
+
+    /// The end of a pause: nap if it's past bedtime, maybe a move, otherwise walk on.
+    fn after_pause(&mut self, room_to_walk: bool) {
+        if self.can.nap && self.clock >= self.bedtime {
+            let remaining = self.rng.random_range(NAP_SECS);
+            self.set_mode(Mode::Nap { remaining }, DOWN);
+        } else if self.clock >= self.next_move_at && self.rng.random_bool(MOVE_CHANCE) {
+            match self.pick_move() {
+                Some(anim) => self.start_move(anim),
+                None => self.walk_or_keep_pausing(room_to_walk),
+            }
         } else {
-            Some(options[self.rng.random_range(0..options.len())].to_string())
+            self.walk_or_keep_pausing(room_to_walk);
         }
     }
 
-    fn choose_next(&mut self) {
-        let flourish = self.pick_flourish();
-        let can_nap = self.anims.has("Sleep");
-        let weights = [
-            WEIGHT_WALK,
-            WEIGHT_IDLE,
-            if flourish.is_some() { WEIGHT_FLOURISH } else { 0 },
-            if can_nap { WEIGHT_NAP } else { 0 },
-        ];
-        let mut roll = self.rng.random_range(0..weights.iter().sum::<u32>());
-        let mut choice = 1;
-        for (i, w) in weights.iter().enumerate() {
-            if roll < *w {
-                choice = i;
-                break;
-            }
-            roll -= w;
-        }
-        match choice {
-            0 => self.start_walk(),
-            2 => self.start_one_shot(flourish.expect("weight is 0 without a flourish")),
-            3 => {
-                let remaining = self.rng.random_range(NAP_SECS);
-                self.set_mode(Mode::Nap { remaining }, DOWN);
-            }
-            _ => self.start_idle(),
+    /// Walks on; with no room to walk it pauses instead (an ongoing pause just continues, so it never flickers).
+    fn walk_or_keep_pausing(&mut self, room_to_walk: bool) {
+        if room_to_walk {
+            self.start_walk();
+        } else if matches!(self.mode, Mode::Pause { .. }) {
+            self.mode = Mode::Pause { remaining: self.rng.random_range(PAUSE_SECS) };
+        } else {
+            self.start_pause();
         }
     }
 
     fn land(&mut self) {
-        if self.anims.has("Hop") {
+        if self.can.hop {
             let remaining = self.anims.secs("Hop");
             self.set_mode(Mode::Landing { remaining }, DOWN);
         } else {
-            self.start_idle();
+            self.start_pause();
         }
     }
 
     pub fn tick(&mut self, dt: f64, g: &Ground) {
+        self.clock += dt;
         match &mut self.mode {
             Mode::Dragged => return,
             Mode::Falling { vy } => {
@@ -241,7 +287,7 @@ impl Brain {
         let done = match &mut self.mode {
             Mode::Walk { remaining_pts } => {
                 if lo >= hi {
-                    *remaining_pts = 0.0; // no room to walk: pick something else
+                    *remaining_pts = 0.0; // no room to walk
                 }
                 let step = speed_pts * dt;
                 let sign = if self.facing == LEFT { -1.0 } else { 1.0 };
@@ -254,34 +300,45 @@ impl Brain {
                 *remaining_pts -= step;
                 *remaining_pts <= 0.0
             }
-            Mode::Idle { remaining } | Mode::Nap { remaining } | Mode::OneShot { remaining, .. } | Mode::Landing { remaining } => {
+            Mode::Pause { remaining } | Mode::Nap { remaining } | Mode::Move { remaining, .. } | Mode::Landing { remaining } => {
                 *remaining -= dt;
                 *remaining <= 0.0
             }
             Mode::Dragged | Mode::Falling { .. } => false,
         };
-        if done {
-            self.choose_next();
+        if !done {
+            return;
+        }
+        match self.mode {
+            Mode::Walk { .. } | Mode::Landing { .. } => self.start_pause(),
+            Mode::Pause { .. } => self.after_pause(lo < hi),
+            Mode::Move { .. } => self.walk_or_keep_pausing(lo < hi),
+            Mode::Nap { .. } => {
+                self.bedtime = self.clock + self.rng.random_range(AWAKE_SECS);
+                self.start_pause();
+            }
+            Mode::Dragged | Mode::Falling { .. } => {}
         }
     }
 
     pub fn visual(&self) -> Visual {
         let (anim, looped) = match &self.mode {
             Mode::Walk { .. } | Mode::Dragged | Mode::Falling { .. } => ("Walk".to_string(), true),
-            Mode::Idle { .. } => ("Idle".to_string(), true),
-            Mode::OneShot { anim, .. } => (anim.clone(), false),
+            Mode::Pause { .. } => ("Idle".to_string(), true),
+            Mode::Move { anim, .. } => (anim.clone(), false),
             Mode::Nap { .. } => ("Sleep".to_string(), true),
             Mode::Landing { .. } => ("Hop".to_string(), false),
         };
         Visual { anim, dir: self.facing, looped, seq: self.seq }
     }
 
+    /// Plays a move right away (no cooldown wait), unless the pet is being carried or falling.
     pub fn click(&mut self) {
         if matches!(self.mode, Mode::Dragged | Mode::Falling { .. }) {
             return;
         }
-        if let Some(anim) = self.pick_flourish() {
-            self.start_one_shot(anim);
+        if let Some(anim) = self.pick_move() {
+            self.start_move(anim);
         }
     }
 
@@ -322,6 +379,13 @@ mod tests {
     use super::*;
 
     const DT: f64 = 1.0 / 60.0;
+    const TWO_HOURS: f64 = 2.0 * 3600.0;
+    /// Spec §5.2 numbers, restated so the tests check the behavior rather than echo the constants.
+    const PAUSE_MAX: f64 = 5.0;
+    const MOVE_COOLDOWN_MIN: f64 = 20.0;
+    const BEDTIME: std::ops::RangeInclusive<f64> = 300.0..=480.0;
+    /// Slack for "at the first pause after bedtime": a walk (240 pts at scale 3 = 8 s) plus a pause.
+    const PAUSE_SLACK: f64 = 8.0 + PAUSE_MAX + 0.1;
 
     fn ground() -> Ground {
         Ground { left: 0.0, right: 1000.0, y: 800.0, px_per_pt: 1.0 }
@@ -333,6 +397,25 @@ mod tests {
 
     fn brain(anims: AnimSet, signature: Option<&str>) -> Brain {
         Brain::new(42, anims, signature.map(String::from), 3, (8.0, 8.0), 500.0, &ground())
+    }
+
+    /// Ticks for `secs`, logging each new behavior as (start time, animation).
+    fn run(b: &mut Brain, g: &Ground, secs: f64) -> Vec<(f64, String)> {
+        let (mut log, mut seq, mut t) = (Vec::new(), u64::MAX, 0.0);
+        while t < secs {
+            b.tick(DT, g);
+            t += DT;
+            let v = b.visual();
+            if v.seq != seq {
+                seq = v.seq;
+                log.push((t, v.anim));
+            }
+        }
+        log
+    }
+
+    fn is_move(anim: &str) -> bool {
+        !matches!(anim, "Walk" | "Idle" | "Sleep")
     }
 
     #[test]
@@ -366,6 +449,157 @@ mod tests {
     }
 
     #[test]
+    fn rhythm_is_walk_then_pause_never_two_in_a_row() {
+        let mut b = brain(full_set(), Some("Withdraw"));
+        let log = run(&mut b, &ground(), TWO_HOURS);
+        for pair in log.windows(2) {
+            let (a, b) = (pair[0].1.as_str(), pair[1].1.as_str());
+            match a {
+                "Walk" => assert_eq!(b, "Idle", "a walk always ends in a pause"),
+                "Idle" => assert!(b != "Idle", "pauses don't stack"),
+                "Sleep" => assert_eq!(b, "Idle", "waking up starts with a pause"),
+                m => assert_eq!(b, "Walk", "after a move ({m}) the pet walks on"),
+            }
+        }
+    }
+
+    #[test]
+    fn pauses_are_short() {
+        let mut b = brain(full_set(), Some("Withdraw"));
+        let log = run(&mut b, &ground(), TWO_HOURS);
+        for pair in log.windows(2) {
+            if pair[0].1 == "Idle" {
+                let secs = pair[1].0 - pair[0].0;
+                assert!(secs <= PAUSE_MAX + DT, "a pause lasted {secs:.2} s at {:.0} s", pair[0].0);
+            }
+        }
+    }
+
+    #[test]
+    fn moves_are_spaced_out_and_never_repeat_back_to_back() {
+        let mut b = brain(full_set(), Some("Withdraw"));
+        let moves: Vec<(f64, String)> = run(&mut b, &ground(), TWO_HOURS).into_iter().filter(|(_, a)| is_move(a)).collect();
+        assert!(moves.len() > 40, "moves should still happen regularly: {}", moves.len());
+        for pair in moves.windows(2) {
+            assert!(pair[1].0 - pair[0].0 >= MOVE_COOLDOWN_MIN, "moves {:.1} s apart", pair[1].0 - pair[0].0);
+            assert_ne!(pair[0].1, pair[1].1, "same move twice in a row at {:.0} s", pair[1].0);
+        }
+    }
+
+    #[test]
+    fn signature_gets_about_half_the_moves() {
+        let mut b = brain(full_set(), Some("Withdraw"));
+        let moves: Vec<String> = run(&mut b, &ground(), TWO_HOURS).into_iter().map(|(_, a)| a).filter(|a| is_move(a)).collect();
+        let share = moves.iter().filter(|a| *a == "Withdraw").count() as f64 / moves.len() as f64;
+        assert!((0.35..=0.65).contains(&share), "signature share {share:.2}");
+    }
+
+    #[test]
+    fn naps_come_after_five_to_eight_minutes_awake() {
+        let mut b = brain(full_set(), None);
+        let log = run(&mut b, &ground(), TWO_HOURS);
+        let mut awake_since = 0.0;
+        let mut naps = 0;
+        for pair in log.windows(2) {
+            if pair[1].1 == "Sleep" {
+                let awake = pair[1].0 - awake_since;
+                assert!(awake >= *BEDTIME.start() && awake <= *BEDTIME.end() + PAUSE_SLACK, "napped after {awake:.0} s awake");
+                naps += 1;
+            }
+            if pair[0].1 == "Sleep" {
+                let nap = pair[1].0 - pair[0].0;
+                assert!((30.0..=90.0 + DT).contains(&nap), "nap lasted {nap:.0} s");
+                awake_since = pair[1].0;
+            }
+        }
+        assert!(naps >= 10, "about one nap every 6-10 minutes over two hours: {naps}");
+    }
+
+    #[test]
+    fn every_behavior_eventually_happens_with_a_full_set() {
+        let mut b = brain(full_set(), None);
+        let seen: std::collections::HashSet<String> = run(&mut b, &ground(), TWO_HOURS).into_iter().map(|(_, a)| a).collect();
+        for anim in ["Walk", "Idle", "Sleep", "Hop", "Rotate"] {
+            assert!(seen.contains(anim), "{anim} never shown; saw {seen:?}");
+        }
+    }
+
+    // Sprites with fewer animations: every behavior whose animation is missing drops out of the rhythm.
+
+    #[test]
+    fn walk_and_idle_only_alternate_and_stay_in_range() {
+        let mut b = brain(AnimSet::from_secs(&[("Walk", 0.6), ("Idle", 1.2)]), None);
+        let g = ground();
+        let mut prev = String::new();
+        let mut changes = 0;
+        for _ in 0..(TWO_HOURS / DT) as usize {
+            b.tick(DT, &g);
+            let v = b.visual();
+            assert!(v.anim == "Walk" || v.anim == "Idle", "{}", v.anim);
+            assert!(b.x >= 24.0 && b.x <= 976.0 && b.x.is_finite());
+            assert_eq!(b.y, 800.0);
+            if v.anim != prev {
+                changes += 1;
+                prev = v.anim;
+            }
+        }
+        assert!(changes > 100, "keeps walking and pausing: {changes}");
+        let seq = b.visual().seq;
+        b.click(); // no move available: nothing happens
+        assert_eq!(b.visual().seq, seq);
+    }
+
+    #[test]
+    fn without_moves_it_still_naps() {
+        let mut b = brain(AnimSet::from_secs(&[("Walk", 0.6), ("Idle", 1.2), ("Sleep", 1.1)]), None);
+        let log = run(&mut b, &ground(), TWO_HOURS);
+        assert!(log.iter().all(|(_, a)| !is_move(a)));
+        assert!(log.iter().any(|(_, a)| a == "Sleep"));
+    }
+
+    #[test]
+    fn a_single_move_may_repeat_but_stays_spaced_out() {
+        let mut b = brain(AnimSet::from_secs(&[("Walk", 0.6), ("Idle", 1.2), ("Rotate", 0.3)]), None);
+        let moves: Vec<f64> = run(&mut b, &ground(), TWO_HOURS).into_iter().filter(|(_, a)| a == "Rotate").map(|(t, _)| t).collect();
+        assert!(moves.len() > 40, "{}", moves.len());
+        assert!(moves.windows(2).all(|w| w[1] - w[0] >= MOVE_COOLDOWN_MIN));
+    }
+
+    #[test]
+    fn no_room_to_walk_means_a_long_pause_not_a_flicker() {
+        let narrow = Ground { left: 100.0, right: 120.0, y: 800.0, px_per_pt: 1.0 };
+        let mut b = Brain::new(1, AnimSet::from_secs(&[("Walk", 0.6), ("Idle", 1.2)]), None, 4, (40.0, 40.0), 0.0, &narrow);
+        for _ in 0..(600.0 / DT) as usize {
+            b.tick(DT, &narrow);
+            assert_eq!(b.x, 110.0);
+            assert_ne!(b.visual().anim, "Walk", "no room: never shows a walk");
+        }
+    }
+
+    #[test]
+    fn click_plays_a_move_at_once_even_during_the_cooldown() {
+        let mut b = brain(full_set(), Some("Withdraw"));
+        b.click();
+        let first = b.visual();
+        assert!(is_move(&first.anim) && !first.looped && first.dir == DOWN, "{first:?}");
+        b.click();
+        let second = b.visual();
+        assert!(is_move(&second.anim) && second.seq != first.seq, "clicks skip the cooldown");
+        assert_ne!(second.anim, first.anim, "but still don't repeat a move");
+    }
+
+    #[test]
+    fn a_click_restarts_the_move_cooldown() {
+        let mut b = brain(full_set(), Some("Withdraw"));
+        let g = ground();
+        run(&mut b, &g, 600.0);
+        b.click();
+        let log = run(&mut b, &g, 600.0);
+        let next = log.iter().find(|(t, a)| *t > 1.0 && is_move(a)).map(|(t, _)| *t).unwrap();
+        assert!(next >= MOVE_COOLDOWN_MIN, "next move {next:.1} s after the click");
+    }
+
+    #[test]
     fn walking_pet_turns_around_at_the_right_edge() {
         let mut b = brain(full_set(), None);
         b.force_walk(RIGHT, 10_000.0);
@@ -386,45 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn minimal_set_never_panics_and_stays_in_range() {
-        let mut b = brain(AnimSet::from_secs(&[("Walk", 0.6), ("Idle", 1.2)]), None);
-        let g = ground();
-        for _ in 0..20_000 {
-            b.tick(DT, &g);
-            let v = b.visual();
-            assert!(v.anim == "Walk" || v.anim == "Idle", "{}", v.anim);
-            assert!(b.x >= 24.0 && b.x <= 976.0 && b.x.is_finite());
-            assert_eq!(b.y, 800.0);
-        }
-        b.click(); // no flourish available: nothing happens
-        assert!(b.visual().anim == "Walk" || b.visual().anim == "Idle");
-    }
-
-    #[test]
-    fn every_behavior_eventually_happens_with_a_full_set() {
-        let mut b = brain(full_set(), None);
-        let mut seen = std::collections::HashSet::new();
-        for _ in 0..200_000 {
-            b.tick(DT, &ground());
-            seen.insert(b.visual().anim);
-        }
-        for anim in ["Walk", "Idle", "Sleep", "Hop", "Rotate"] {
-            assert!(seen.contains(anim), "{anim} never shown; saw {seen:?}");
-        }
-    }
-
-    #[test]
-    fn click_plays_signature_once_then_moves_on() {
-        let mut b = brain(full_set(), Some("Withdraw"));
-        b.click();
-        let v = b.visual();
-        assert_eq!((v.anim.as_str(), v.looped, v.dir), ("Withdraw", false, DOWN));
-        for _ in 0..60 { b.tick(DT, &ground()); } // 1 s > 0.73 s
-        assert_ne!(b.visual().seq, v.seq);
-    }
-
-    #[test]
-    fn drag_faces_movement_then_drop_falls_and_lands_with_hop() {
+    fn drag_faces_movement_then_drop_falls_lands_with_hop_and_pauses() {
         let mut b = brain(full_set(), None);
         b.drag_start((500.0, 790.0));
         b.drag_move((450.0, 400.0)); // up-left-ish, mostly up
@@ -433,39 +629,23 @@ mod tests {
         assert_eq!(b.visual().dir, dir_from_delta(-50.0, -390.0));
         assert_eq!((b.x, b.y), (450.0, 410.0)); // keeps the grab offset (+10 px)
         b.drop_pet();
-        let mut landed = false;
-        for _ in 0..120 {
-            b.tick(DT, &ground());
-            if b.visual().anim == "Hop" { landed = true; break; }
-        }
-        assert!(landed, "should land within 2 s");
+        let log = run(&mut b, &ground(), 3.0);
+        let anims: Vec<&str> = log.iter().map(|(_, a)| a.as_str()).collect();
+        assert_eq!(&anims[..3], ["Walk", "Hop", "Idle"], "falls, lands with a hop, then pauses");
+        assert!(log[1].0 < 2.0, "should land within 2 s");
         assert_eq!(b.y, 800.0);
     }
 
     #[test]
-    fn drop_without_hop_goes_idle() {
+    fn drop_without_hop_pauses() {
         let mut b = brain(AnimSet::from_secs(&[("Walk", 0.6), ("Idle", 1.2)]), None);
         b.drag_start((500.0, 800.0));
+        b.drag_move((500.0, 700.0)); // lift it 100 px
         b.drop_pet();
-        for _ in 0..120 { b.tick(DT, &ground()); }
+        let log = run(&mut b, &ground(), 2.0);
+        assert_eq!(log.iter().map(|(_, a)| a.as_str()).take(2).collect::<Vec<_>>(), ["Walk", "Idle"]);
         assert_eq!(b.y, 800.0);
         assert!(!b.is_dragged());
-    }
-
-    #[test]
-    fn pet_wider_than_ground_is_centered() {
-        let narrow = Ground { left: 100.0, right: 120.0, y: 800.0, px_per_pt: 1.0 };
-        let mut b = Brain::new(1, full_set(), None, 4, (40.0, 40.0), 0.0, &narrow);
-        let mut prev = b.visual();
-        for _ in 0..600 {
-            b.tick(DT, &narrow);
-            assert_eq!(b.x, 110.0);
-            let v = b.visual();
-            if v.seq == prev.seq {
-                assert_eq!(v.dir, prev.dir, "direction must not flip without a mode change");
-            }
-            prev = v;
-        }
     }
 
     #[test]
