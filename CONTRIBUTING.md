@@ -92,6 +92,7 @@ and they are squash-merged.
 ## Releasing
 
 Releases are cut by maintainers from `main` by pushing a version tag; GitHub Actions does the rest.
+Only repository admins can create, move or delete `v*` tags, and published releases are immutable.
 Versions follow [Semantic Versioning](https://semver.org/): bump the patch for fixes, the minor for new
 features, and the major for anything that breaks saved settings or existing behavior.
 

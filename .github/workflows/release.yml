@@ -13,7 +13,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with: { fetch-depth: 0 }
+        with: { persist-credentials: false, fetch-depth: 0 }
       - name: Tag is on main and matches the app version
         run: |
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
@@ -48,10 +48,9 @@ jobs:
           gh release create "$TAG" --draft --verify-tag --title "Wanderdex $TAG" --generate-notes \
             --notes "Download the .dmg (macOS) or the -setup.exe (Windows). See the README for first-launch steps on unsigned apps."
 
+  # Builds run third-party build tooling, so they get a read-only token; the publish job uploads.
   build:
     needs: draft
-    permissions:
-      contents: write # upload installers to the draft release
     strategy:
       fail-fast: false
       matrix:
@@ -60,10 +59,9 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with: { version: 10 }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -83,10 +81,10 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           pnpm tauri build --target universal-apple-darwin --bundles app
-          out="Wanderdex_${TAG#v}_universal.dmg"
+          mkdir -p out
           pipx run --spec dmgbuild==1.6.5 dmgbuild -s src-tauri/dmg/settings.py \
-            -D app=src-tauri/target/universal-apple-darwin/release/bundle/macos/Wanderdex.app Wanderdex "$out"
-          gh release upload "$TAG" "$out"
+            -D app=src-tauri/target/universal-apple-darwin/release/bundle/macos/Wanderdex.app \
+            Wanderdex "out/Wanderdex_${TAG#v}_universal.dmg"
 
       - name: Build the Windows installer
         if: runner.os == 'Windows'
@@ -95,6 +93,28 @@ jobs:
           pnpm tauri build --bundles nsis
           nsis=$(ls src-tauri/target/release/bundle/nsis/*-setup.exe)
           (cd setup && WANDERDEX_INSTALLER="$GITHUB_WORKSPACE/$nsis" ../node_modules/.bin/tauri build --no-bundle)
-          out="Wanderdex_${TAG#v}_x64-setup.exe"
-          cp setup/src-tauri/target/release/wanderdex-setup.exe "$out"
-          gh release upload "$TAG" "$out"
+          mkdir -p out
+          cp setup/src-tauri/target/release/wanderdex-setup.exe "out/Wanderdex_${TAG#v}_x64-setup.exe"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-${{ runner.os }}
+          path: out/
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # upload the installers to the draft release
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: installer-*
+          path: out
+          merge-multiple: true
+      - name: Upload installers to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$TAG" out/*

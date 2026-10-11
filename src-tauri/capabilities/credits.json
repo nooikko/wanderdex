@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "credits",
+  "description": "The credits window opens the artist and license links in the browser",
+  "windows": ["credits"],
+  "permissions": ["opener:allow-open-url", "opener:allow-default-urls"]
+}

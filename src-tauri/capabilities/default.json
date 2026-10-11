@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for all Wanderdex windows",
+  "description": "Core permissions for all Wanderdex windows",
   "windows": ["picker", "credits", "contact", "pet-*"],
-  "permissions": ["core:default", "opener:default"]
+  "permissions": ["core:default"]
 }
