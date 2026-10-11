@@ -6,7 +6,7 @@
 Pokémon that wander your desktop. Pick any of 976 Pokémon and it walks back and forth along the bottom
 of your screen, naps, and shows off its moves while you work.
 
-![Charmander, Pikachu, Eevee, Wobbuffet, Snorlax and Squirtle wandering along the bottom of a desktop](.github/assets/pets.gif)
+![A minute with six pets along the bottom of a desktop: Snorlax wakes from a nap and wanders off, Eevee hops around, and Charmander, Pikachu, Squirtle and Wobbuffet walk, idle and play](.github/assets/pets.webp)
 
 ## What you can do
 
