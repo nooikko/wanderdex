@@ -20,7 +20,8 @@ of your screen, naps, and shows off its moves while you work.
 - **Pick up where you left off.** Your pets are still there after a restart, and Wanderdex can launch
   at login.
 - **Stay out of the way.** It lives in the menu bar or system tray: change the size (2×, 3×, 4×) or hide every
-  pet with one click.
+  pet with one click. On macOS, clicks on the empty space around a pet go straight through to whatever is
+  underneath.
 
 ![The Wanderdex picker: a searchable grid of Pokémon, with Wobbuffet selected and previewed](.github/assets/picker.png)
 

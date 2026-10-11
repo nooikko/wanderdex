@@ -22,12 +22,12 @@ impl Default for Settings {
     }
 }
 
+/// A pet that was out. Only which one, not where: it reappears at a random spot. (Older files
+/// also have `x`/`y`; serde ignores them.)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedPet {
     pub variant: String,
-    pub x: f64,
-    pub y: f64,
 }
 
 pub fn load(path: &Path) -> Settings {
@@ -68,8 +68,8 @@ mod tests {
 
     #[test]
     fn unrestored_pets_survive_saves() {
-        let live = vec![SavedPet { variant: "0202".into(), x: 1.0, y: 2.0 }];
-        let pending = vec![SavedPet { variant: "0025".into(), x: 3.0, y: 4.0 }];
+        let live = vec![SavedPet { variant: "0202".into() }];
+        let pending = vec![SavedPet { variant: "0025".into() }];
         let saved = pets_to_save(live, &pending);
         let variants: Vec<&str> = saved.iter().map(|p| p.variant.as_str()).collect();
         assert_eq!(variants, ["0202", "0025"]);
@@ -82,7 +82,7 @@ mod tests {
         let s = Settings {
             scale: 4,
             hidden: true,
-            pets: vec![SavedPet { variant: "0202".into(), x: 10.0, y: 20.0 }],
+            pets: vec![SavedPet { variant: "0202".into() }],
             credited: vec!["0202".into()],
         };
         save(&path, &s).unwrap();
@@ -97,6 +97,14 @@ mod tests {
         std::fs::write(&path, "{not json").unwrap();
         assert_eq!(load(&path), Settings::default());
         assert_eq!(Settings::default().scale, 3);
+    }
+
+    #[test]
+    fn older_files_with_pet_positions_still_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"scale": 4, "pets": [{"variant": "0202", "x": 1555.2, "y": 2068.0}]}"#).unwrap();
+        assert_eq!(load(&path).pets, [SavedPet { variant: "0202".into() }]);
     }
 
     #[test]
@@ -121,15 +129,14 @@ mod tests {
                     form: "Normal".into(),
                     shiny: false,
                     female: false,
-                    anims: vec!["Idle".into(), "Walk".into()],
                     credits: vec![],
                 }],
             }],
         };
         let s = Settings {
             pets: vec![
-                SavedPet { variant: "0202".into(), x: 0.0, y: 0.0 },
-                SavedPet { variant: "9999/0001".into(), x: 0.0, y: 0.0 },
+                SavedPet { variant: "0202".into() },
+                SavedPet { variant: "9999/0001".into() },
             ],
             ..Settings::default()
         };

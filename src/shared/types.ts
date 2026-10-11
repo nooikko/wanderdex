@@ -11,7 +11,7 @@ export interface ContentBox { minX: number; minY: number; maxX: number; maxY: nu
 export interface Visual { anim: string; dir: number; looped: boolean; seq: number }
 export interface PetInit { dir: string; table: AnimInfo[]; contentBox: ContentBox; scale: number; visual: Visual }
 export interface VariantPayload { dir: string; table: AnimInfo[]; contentBox: ContentBox; signature: string | null }
-export interface Variant { path: string; formId: string; form: string; shiny: boolean; female: boolean; anims: string[]; credits: string[] }
+export interface Variant { path: string; formId: string; form: string; shiny: boolean; female: boolean; credits: string[] }
 export interface Species { dex: string; name: string; hasPortrait: boolean; variants: Variant[] }
 export interface Index { spriteCollabSha: string; species: Species[] }
 export interface ActivePet { label: string; variant: string; dex: string; name: string; form: string; shiny: boolean; female: boolean }

@@ -5,8 +5,8 @@ use crate::brain::Visual;
 use crate::pets::{self, AppState};
 use crate::animdata::AnimInfo;
 use serde::Serialize;
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder};
+use tauri::{AppHandle, Manager, WebviewWindow, Wry};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,24 +62,25 @@ pub async fn pet_drag_move(window: WebviewWindow) {
 #[tauri::command]
 pub async fn pet_drop(window: WebviewWindow) {
     with_pet(&window, |p| p.brain.drop_pet());
-    pets::save_settings(window.app_handle());
 }
 
 #[tauri::command]
 pub async fn pet_context_menu(window: WebviewWindow) -> Result<(), String> {
-    let app = window.app_handle();
-    let label = window.label();
-    let menu = MenuBuilder::new(app)
-        .item(&MenuItemBuilder::with_id(format!("pet-move:{label}"), "Do a move").build(app).map_err(|e| e.to_string())?)
-        .item(&MenuItemBuilder::with_id(format!("pet-credits:{label}"), "Credits for this Pokémon").build(app).map_err(|e| e.to_string())?)
-        .separator()
-        .item(&MenuItemBuilder::with_id(format!("pet-remove:{label}"), "Remove").build(app).map_err(|e| e.to_string())?)
-        .item(&MenuItemBuilder::with_id("pets-remove-all", "Remove all").build(app).map_err(|e| e.to_string())?)
-        .separator()
-        .item(&MenuItemBuilder::with_id("open-picker", "Open picker").build(app).map_err(|e| e.to_string())?)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let menu = pet_menu(window.app_handle(), window.label()).map_err(|e| e.to_string())?;
     window.popup_menu(&menu).map_err(|e| e.to_string())
+}
+
+/// A pet's right-click menu.
+pub fn pet_menu(app: &AppHandle, label: &str) -> tauri::Result<Menu<Wry>> {
+    MenuBuilder::new(app)
+        .item(&MenuItemBuilder::with_id(format!("pet-move:{label}"), "Do a move").build(app)?)
+        .item(&MenuItemBuilder::with_id(format!("pet-credits:{label}"), "Credits for this Pokémon").build(app)?)
+        .separator()
+        .item(&MenuItemBuilder::with_id(format!("pet-remove:{label}"), "Remove").build(app)?)
+        .item(&MenuItemBuilder::with_id("pets-remove-all", "Remove all").build(app)?)
+        .separator()
+        .item(&MenuItemBuilder::with_id("open-picker", "Open picker").build(app)?)
+        .build()
 }
 
 /// Shared by menus: make a pet do its move.
@@ -91,7 +92,7 @@ pub fn pet_move(app: &AppHandle, label: &str) {
     }
 }
 
-use crate::index::{bundled, find_variant, signature_for, Index};
+use crate::index::{bundled, find_variant, signature_for, BUNDLED_JSON};
 use crate::sprites::{ensure_portrait, ensure_variant};
 
 #[derive(Serialize)]
@@ -116,8 +117,8 @@ pub struct ActivePet {
 }
 
 #[tauri::command]
-pub fn get_index() -> Index {
-    bundled().clone()
+pub fn get_index() -> tauri::ipc::Response {
+    tauri::ipc::Response::new(BUNDLED_JSON.to_string())
 }
 
 #[tauri::command]
@@ -143,7 +144,7 @@ pub async fn load_variant(app: AppHandle, path: String) -> Result<VariantPayload
 
 #[tauri::command]
 pub async fn spawn(app: AppHandle, variant: String) -> Result<(), String> {
-    pets::spawn_pet(&app, &variant, None).await
+    pets::spawn_pet(&app, &variant).await
 }
 
 #[tauri::command]
