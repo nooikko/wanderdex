@@ -1,9 +1,13 @@
 version: 2
+# The 7-day cooldown skips releases younger than a week, the usual window for a hijacked package to be
+# caught and pulled. Security updates ignore it.
 updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       # Vite, its React plugin and Vitest are upgraded together: @vitejs/plugin-react only works with one
       # Vite major. Listed first so it also catches their major versions.
@@ -16,6 +20,8 @@ updates:
     directories: ["/src-tauri", "/setup/src-tauri"]
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       cargo-minor-patch:
         patterns: ["*"]
@@ -24,6 +30,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       actions-minor-patch:
         patterns: ["*"]

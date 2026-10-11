@@ -1,0 +1,26 @@
+# cargo-deny for both crates: `cargo deny --manifest-path src-tauri/Cargo.toml check` (and setup/src-tauri).
+[graph]
+# Only the platforms Wanderdex ships on. Tauri's Linux (GTK) dependencies are never built.
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-pc-windows-msvc"]
+all-features = false
+
+[advisories]
+ignore = []
+
+[licenses]
+# Permissive licenses, plus MPL-2.0 (file-level copyleft: fine to ship in an MIT app unmodified).
+allow = [
+  "0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0", "MIT", "MIT-0",
+  "MPL-2.0", "Unicode-3.0", "Unlicense", "Zlib",
+]
+confidence-threshold = 0.8
+# One list covers both crates (src-tauri and setup), so not every license appears in each.
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
