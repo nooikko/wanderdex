@@ -364,8 +364,8 @@ fn draw_frame(app: &AppHandle, pet: &mut Pet, now: Instant, k: f64) {
     let (cw, ch) = (fw / sheet_w, fh / sheet_h);
     let frame = crate::native::Frame {
         source: anim.source.clone(),
-        // Unit rect in the sheet; CoreAnimation's unit space starts at the image's bottom edge.
-        contents: (col as f64 * cw, 1.0 - (row as f64 + 1.0) * ch, cw, ch),
+        // Unit rect in the sheet, rows counted from the top (the pet view is flipped, and so is its layer tree).
+        contents: (col as f64 * cw, row as f64 * ch, cw, ch),
         // Every frame's center sits on the anchor (-min_x, -min_y), as in the web renderer.
         dest: (
             (-pet.content.min_x - anim.frame_width as i32 / 2) as f64 * k,
