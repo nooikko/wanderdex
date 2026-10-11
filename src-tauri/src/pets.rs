@@ -121,13 +121,13 @@ fn snapped(g: Ground, scale: u32) -> Ground {
     Ground { px_per_pt: sprite_px(scale, g.px_per_pt) / scale as f64, ..g }
 }
 
-/// Downloads (if needed) and spawns a pet. `at` is a physical (x, feet y); default: random spot under the cursor.
-pub async fn spawn_pet(app: &AppHandle, variant: &str, at: Option<(f64, f64)>) -> Result<(), String> {
-    spawn_inner(app, variant, at, None).await
+/// Downloads (if needed) and spawns a pet at a random spot on the ground under the cursor.
+pub async fn spawn_pet(app: &AppHandle, variant: &str) -> Result<(), String> {
+    spawn_inner(app, variant, None).await
 }
 
 /// `restoring`: the pending saved pet this spawn replaces; it leaves `pending` the moment the pet is live.
-async fn spawn_inner(app: &AppHandle, variant: &str, at: Option<(f64, f64)>, restoring: Option<&SavedPet>) -> Result<(), String> {
+async fn spawn_inner(app: &AppHandle, variant: &str, restoring: Option<&SavedPet>) -> Result<(), String> {
     let index = bundled();
     let (species, _) = find_variant(index, variant).ok_or_else(|| format!("Unknown variant {variant}"))?;
     let state = app.state::<AppState>();
@@ -142,11 +142,11 @@ async fn spawn_inner(app: &AppHandle, variant: &str, at: Option<(f64, f64)>, res
     let table = AnimTable { anims: loaded.table.anims.into_iter().filter(|a| behaviors.contains(&a.name)).collect() };
     let scale = state.settings.lock().unwrap().scale;
 
-    let (x, y) = at.unwrap_or_else(|| {
+    let (x, y) = {
         let c = cursor(app);
         let g = ground_at(app, c.0, c.1);
         (rand::rng().random_range(g.left..g.right.max(g.left + 1.0)), g.y)
-    });
+    };
     let g = snapped(ground_at(app, x, y), scale);
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let label = format!("pet-{id}");
@@ -167,12 +167,7 @@ async fn spawn_inner(app: &AppHandle, variant: &str, at: Option<(f64, f64)>, res
         .inner_size(pts.0, pts.1)
         .build()
         .map_err(|e| e.to_string())?;
-    let mut brain = Brain::new(id ^ 0x5eed, AnimSet::from_table(&table), signature, scale, (-content.min_x as f64, content.max_x as f64), x, &g);
-    brain.y = y.min(g.y);
-    if brain.y < g.y {
-        brain.drag_start((brain.x, brain.y));
-        brain.drop_pet(); // restored mid-air: fall to the ground
-    }
+    let brain = Brain::new(id ^ 0x5eed, AnimSet::from_table(&table), signature, scale, (-content.min_x as f64, content.max_x as f64), x, &g);
     let pet = Pet {
         label,
         variant: variant.to_string(),
@@ -253,7 +248,8 @@ pub fn set_hidden(app: &AppHandle, hidden: bool) {
     save_settings(app);
 }
 
-/// Writes settings, including every live pet's position.
+/// Writes settings, including which pets are out (not where: they reappear at random spots).
+/// Called when something changes, never on a timer.
 pub fn save_settings(app: &AppHandle) {
     let state = app.state::<AppState>();
     let pets: Vec<SavedPet> = state
@@ -261,7 +257,7 @@ pub fn save_settings(app: &AppHandle) {
         .lock()
         .unwrap()
         .iter()
-        .map(|p| SavedPet { variant: p.variant.clone(), x: p.brain.x, y: p.brain.y })
+        .map(|p| SavedPet { variant: p.variant.clone() })
         .collect();
     let pending = state.pending.lock().unwrap().clone();
     let snapshot = {
@@ -319,7 +315,6 @@ pub fn start_loop(app: AppHandle) {
     let handle = std::thread::spawn(move || {
         let mut last = Instant::now();
         let mut last_monitor_refresh = Instant::now() - Duration::from_secs(10);
-        let mut last_save = Instant::now();
         loop {
             std::thread::sleep(Duration::from_millis(16));
             let state = app.state::<AppState>();
@@ -345,10 +340,6 @@ pub fn start_loop(app: AppHandle) {
             for pet in state.pets.lock().unwrap().iter_mut() {
                 step(&app, pet, dt, &monitors, scale, hidden);
             }
-            if now - last_save > Duration::from_secs(5) {
-                save_settings(&app);
-                last_save = now;
-            }
         }
     });
     let _ = registrar.state::<AppState>().ticker.set(handle.thread().clone());
@@ -365,7 +356,7 @@ pub fn restore(app: AppHandle) {
     *app.state::<AppState>().pending.lock().unwrap() = saved.clone();
     tauri::async_runtime::spawn(async move {
         for p in saved {
-            if let Err(e) = spawn_inner(&app, &p.variant, Some((p.x, p.y)), Some(&p)).await {
+            if let Err(e) = spawn_inner(&app, &p.variant, Some(&p)).await {
                 eprintln!("Couldn't restore {}: {e} (kept for next launch)", p.variant);
             }
         }

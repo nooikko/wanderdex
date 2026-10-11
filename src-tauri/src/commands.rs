@@ -62,7 +62,6 @@ pub async fn pet_drag_move(window: WebviewWindow) {
 #[tauri::command]
 pub async fn pet_drop(window: WebviewWindow) {
     with_pet(&window, |p| p.brain.drop_pet());
-    pets::save_settings(window.app_handle());
 }
 
 #[tauri::command]
@@ -143,7 +142,7 @@ pub async fn load_variant(app: AppHandle, path: String) -> Result<VariantPayload
 
 #[tauri::command]
 pub async fn spawn(app: AppHandle, variant: String) -> Result<(), String> {
-    pets::spawn_pet(&app, &variant, None).await
+    pets::spawn_pet(&app, &variant).await
 }
 
 #[tauri::command]

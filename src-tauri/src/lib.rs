@@ -69,7 +69,7 @@ pub fn run() {
             if let Ok(variant) = std::env::var("WANDERDEX_SPAWN") {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Err(e) = pets::spawn_pet(&handle, &variant, None).await {
+                    if let Err(e) = pets::spawn_pet(&handle, &variant).await {
                         eprintln!("spawn failed: {e}");
                     }
                 });
