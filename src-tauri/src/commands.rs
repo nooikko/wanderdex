@@ -91,7 +91,7 @@ pub fn pet_move(app: &AppHandle, label: &str) {
     }
 }
 
-use crate::index::{bundled, find_variant, signature_for, Index};
+use crate::index::{bundled, find_variant, signature_for, BUNDLED_JSON};
 use crate::sprites::{ensure_portrait, ensure_variant};
 
 #[derive(Serialize)]
@@ -116,8 +116,8 @@ pub struct ActivePet {
 }
 
 #[tauri::command]
-pub fn get_index() -> Index {
-    bundled().clone()
+pub fn get_index() -> tauri::ipc::Response {
+    tauri::ipc::Response::new(BUNDLED_JSON.to_string())
 }
 
 #[tauri::command]

@@ -16,22 +16,35 @@ async function main() {
   let ctx = setupCanvas(canvas, init.contentBox, scale, window.devicePixelRatio || 1);
   player.play(init.visual, performance.now());
 
-  await win.listen<Visual>("pet:anim", (e) => player.play(e.payload, performance.now()));
+  // Draw only when the frame changes, then sleep until the next one is due: sprite frames last
+  // several ticks, so redrawing every display refresh would mostly repaint the same pixels.
+  let drawn = "";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const render = () => {
+    clearTimeout(timer);
+    const now = performance.now();
+    const f = player.frame(now);
+    const key = f ? `${f.anim.name}|${f.dir}|${f.col}` : "";
+    if (key !== drawn) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const img = f && sheets.get(f.anim.source);
+      if (f && img) drawFrame(ctx, img, f.anim, f.dir, f.col, init.contentBox, scale);
+      drawn = key;
+    }
+    if (f?.nextMs != null) timer = setTimeout(render, Math.max(0, f.nextMs - now) + 1);
+  };
+
+  await win.listen<Visual>("pet:anim", (e) => {
+    player.play(e.payload, performance.now());
+    render();
+  });
   await win.listen<number>("pet:scale", (e) => {
     scale = e.payload;
     ctx = setupCanvas(canvas, init.contentBox, scale, window.devicePixelRatio || 1);
+    drawn = ""; // resizing cleared the canvas
+    render();
   });
-
-  const render = (now: number) => {
-    const f = player.frame(now);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (f) {
-      const img = sheets.get(f.anim.source);
-      if (img) drawFrame(ctx, img, f.anim, f.dir, f.col, init.contentBox, scale);
-    }
-    requestAnimationFrame(render);
-  };
-  requestAnimationFrame(render);
+  render();
 
   const drag = new DragTracker((cmd) => invoke(cmd));
   canvas.addEventListener("pointerdown", (e) => {

@@ -121,7 +121,6 @@ mod tests {
                     form: "Normal".into(),
                     shiny: false,
                     female: false,
-                    anims: vec!["Idle".into(), "Walk".into()],
                     credits: vec![],
                 }],
             }],

@@ -33,6 +33,15 @@ describe("Player", () => {
     p.play({ anim: "Hop", dir: 0, looped: false, seq: 5 }, 0);
     expect(p.frame(10_000)!.col).toBe(2);
   });
+  test("reports when the next frame is due, and nothing after a one-shot ends", () => {
+    const p = new Player([idle, hop]);
+    p.play({ anim: "Idle", dir: 0, looped: true, seq: 1 }, 1000);
+    expect(p.frame(1000)!.nextMs).toBeCloseTo(1000 + (40 * 1000) / 60); // first frame lasts 40 ticks
+    expect(p.frame(1000 + (73 * 1000) / 60)!.nextMs).toBeCloseTo(1000 + (112 * 1000) / 60); // wrapped: 72 + 40
+    p.play({ anim: "Hop", dir: 0, looped: false, seq: 2 }, 0);
+    expect(p.frame(0)!.nextMs).toBeCloseTo((2 * 1000) / 60);
+    expect(p.frame(10_000)!.nextMs).toBeNull();
+  });
   test("unknown animation yields null", () => {
     const p = new Player([idle]);
     p.play({ anim: "Nope", dir: 0, looped: true, seq: 1 }, 0);

@@ -30,7 +30,6 @@ pub struct Variant {
     pub form: String,
     pub shiny: bool,
     pub female: bool,
-    pub anims: Vec<String>,
     /// Primary artist first, then secondary.
     pub credits: Vec<String>,
 }
@@ -74,8 +73,6 @@ fn collect<'a>(
                 None => format!("Form {form_id}"),
             }
         };
-        let mut anims: Vec<String> = files.into_iter().flatten().map(|(k, _)| k.clone()).collect();
-        anims.sort();
         let credit = &node["sprite_credit"];
         let mut credits = Vec::new();
         if let Some(p) = credit["primary"].as_str().filter(|p| !p.is_empty()) {
@@ -95,7 +92,6 @@ fn collect<'a>(
             form,
             shiny: segs.get(1).is_some_and(|s| s == "0001"),
             female: segs.get(2).is_some_and(|s| s == "0002"),
-            anims,
             credits,
         });
     }
@@ -135,9 +131,10 @@ pub fn build(tracker: &Value, credit_names: &str, sha: &str) -> Index {
     Index { sprite_collab_sha: sha.to_string(), species }
 }
 
-static BUNDLED: LazyLock<Index> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("../resources/index.json")).expect("bundled index.json is valid")
-});
+/// The bundled index as JSON, sent to the picker as is (no clone, no re-serialize).
+pub const BUNDLED_JSON: &str = include_str!("../resources/index.json");
+
+static BUNDLED: LazyLock<Index> = LazyLock::new(|| serde_json::from_str(BUNDLED_JSON).expect("bundled index.json is valid"));
 
 pub fn bundled() -> &'static Index {
     &BUNDLED
@@ -227,7 +224,7 @@ mod tests {
 
         let absol = &idx.species[2];
         assert!(absol.has_portrait, "unlocked (false) portraits still exist");
-        assert_eq!(absol.variants[0].anims, ["Idle", "Walk"], "unlocked (false) sprites still exist");
+        assert_eq!(absol.variants.len(), 1, "unlocked (false) sprites still exist");
 
         let wob = &idx.species[1];
         assert_eq!(wob.name, "Wobbuffet");
@@ -239,7 +236,6 @@ mod tests {
             ("0202/0000/0000/0002", "Normal", false, true),
             ("0202/0000/0001", "Normal", true, false),
         ]);
-        assert_eq!(wob.variants[0].anims, ["Hurt", "Idle", "Walk", "Withdraw"]);
 
         let rat = &idx.species[0];
         assert!(!rat.has_portrait);
@@ -280,12 +276,6 @@ mod tests {
         let idx = bundled();
         assert_eq!(idx.sprite_collab_sha.len(), 40, "pinned to a full commit SHA");
         assert!(idx.species.len() > 900);
-        let (_, wob) = find_variant(idx, "0202").expect("Wobbuffet present");
-        assert!(wob.anims.iter().any(|a| a == "Walk") && wob.anims.iter().any(|a| a == "Idle"));
-        for s in &idx.species {
-            for v in &s.variants {
-                assert!(v.anims.iter().any(|a| a == "Walk") && v.anims.iter().any(|a| a == "Idle"), "{}", v.path);
-            }
-        }
+        assert!(find_variant(idx, "0202").is_some(), "Wobbuffet present");
     }
 }

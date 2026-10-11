@@ -10,7 +10,7 @@ use crate::animdata::AnimTable;
 use rand::RngExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
@@ -40,6 +40,8 @@ pub struct AppState {
     monitors: Mutex<Vec<MonitorInfo>>,
     /// Saved pets not yet restored (or whose restore failed); kept in every save.
     pending: Mutex<Vec<SavedPet>>,
+    /// The pet loop's thread, parked while there's nothing to animate.
+    ticker: OnceLock<std::thread::Thread>,
 }
 
 impl AppState {
@@ -54,6 +56,7 @@ impl AppState {
             next_id: AtomicU64::new(1),
             monitors: Mutex::new(Vec::new()),
             pending: Mutex::new(Vec::new()),
+            ticker: OnceLock::new(),
         }
     }
 }
@@ -132,8 +135,11 @@ async fn spawn_inner(app: &AppHandle, variant: &str, at: Option<(f64, f64)>, res
         .await
         .map_err(|e| e.to_string())?;
     let signature = signature_for(&species.dex).map(String::from);
-    let content = content_box(&loaded.table, &loaded.sheets, &behavior_anims(signature.as_deref()));
+    let behaviors = behavior_anims(signature.as_deref());
+    let content = content_box(&loaded.table, &loaded.sheets, &behaviors);
     let feet = feet_line(&loaded.table, &loaded.sheets);
+    // The pet window loads a sheet per animation in its table; keep only what the brain can play.
+    let table = AnimTable { anims: loaded.table.anims.into_iter().filter(|a| behaviors.contains(&a.name)).collect() };
     let scale = state.settings.lock().unwrap().scale;
 
     let (x, y) = at.unwrap_or_else(|| {
@@ -161,7 +167,7 @@ async fn spawn_inner(app: &AppHandle, variant: &str, at: Option<(f64, f64)>, res
         .inner_size(pts.0, pts.1)
         .build()
         .map_err(|e| e.to_string())?;
-    let mut brain = Brain::new(id ^ 0x5eed, AnimSet::from_table(&loaded.table), signature, scale, (-content.min_x as f64, content.max_x as f64), x, &g);
+    let mut brain = Brain::new(id ^ 0x5eed, AnimSet::from_table(&table), signature, scale, (-content.min_x as f64, content.max_x as f64), x, &g);
     brain.y = y.min(g.y);
     if brain.y < g.y {
         brain.drag_start((brain.x, brain.y));
@@ -171,7 +177,7 @@ async fn spawn_inner(app: &AppHandle, variant: &str, at: Option<(f64, f64)>, res
         label,
         variant: variant.to_string(),
         dir: loaded.dir,
-        table: loaded.table,
+        table,
         content,
         feet,
         brain,
@@ -182,6 +188,7 @@ async fn spawn_inner(app: &AppHandle, variant: &str, at: Option<(f64, f64)>, res
         shown: false,
     };
     state.pets.lock().unwrap().push(pet);
+    wake_loop(app);
     if let Some(p) = restoring {
         let mut pending = state.pending.lock().unwrap();
         if let Some(i) = pending.iter().position(|q| q == p) {
@@ -239,8 +246,10 @@ pub fn set_hidden(app: &AppHandle, hidden: bool) {
     let state = app.state::<AppState>();
     state.settings.lock().unwrap().hidden = hidden;
     for p in state.pets.lock().unwrap().iter() {
-        let _ = if hidden { p.window.hide() } else { p.window.show() };
+        // A pet spawned while hidden was never placed: the loop shows it once it has a position.
+        let _ = if hidden { p.window.hide() } else if p.shown { p.window.show() } else { Ok(()) };
     }
+    wake_loop(app);
     save_settings(app);
 }
 
@@ -298,17 +307,32 @@ fn step(app: &AppHandle, pet: &mut Pet, dt: f64, monitors: &[MonitorInfo], scale
     }
 }
 
+/// Resumes the pet loop after it parked (no pets, or all hidden).
+fn wake_loop(app: &AppHandle) {
+    if let Some(t) = app.state::<AppState>().ticker.get() {
+        t.unpark();
+    }
+}
+
 pub fn start_loop(app: AppHandle) {
-    std::thread::spawn(move || {
+    let registrar = app.clone();
+    let handle = std::thread::spawn(move || {
         let mut last = Instant::now();
         let mut last_monitor_refresh = Instant::now() - Duration::from_secs(10);
         let mut last_save = Instant::now();
         loop {
             std::thread::sleep(Duration::from_millis(16));
+            let state = app.state::<AppState>();
+            // Nothing to animate: sleep until a spawn or unhide wakes us. Hidden pets stay where they were.
+            let idle = state.settings.lock().unwrap().hidden || state.pets.lock().unwrap().is_empty();
+            if idle {
+                std::thread::park();
+                last = Instant::now();
+                continue;
+            }
             let now = Instant::now();
             let dt = (now - last).as_secs_f64().min(0.1);
             last = now;
-            let state = app.state::<AppState>();
             if now - last_monitor_refresh > Duration::from_secs(1) {
                 *state.monitors.lock().unwrap() = monitor_infos(&app);
                 last_monitor_refresh = now;
@@ -327,6 +351,7 @@ pub fn start_loop(app: AppHandle) {
             }
         }
     });
+    let _ = registrar.state::<AppState>().ticker.set(handle.thread().clone());
 }
 
 /// Respawns saved pets that still exist in the index. Until each one is live it stays in `pending`, so a
